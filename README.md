@@ -1,1 +1,0 @@
-# ros_hardware_in_the_loop_system
