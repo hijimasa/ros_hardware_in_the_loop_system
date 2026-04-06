@@ -49,3 +49,6 @@ qtcreator-*
 
 # Catkin custom files
 CATKIN_IGNORE
+
+# pico-sdk import file (copied from pico-sdk, not tracked)
+pico_sdk_import.cmake
