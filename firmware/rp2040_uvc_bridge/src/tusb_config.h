@@ -42,7 +42,7 @@ extern "C" {
 /* ---- Video ---- */
 #define CFG_TUD_VIDEO              1
 #define CFG_TUD_VIDEO_STREAMING    1
-#define CFG_TUD_VIDEO_STREAMING_EP_BUFSIZE  512
+#define CFG_TUD_VIDEO_STREAMING_EP_BUFSIZE  1023  /* FS isochronous max */
 #define CFG_TUD_VIDEO_STREAMING_BULK  0  /* Use isochronous */
 
 #ifdef __cplusplus
