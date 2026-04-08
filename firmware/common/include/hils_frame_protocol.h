@@ -25,7 +25,7 @@
 
 /* UART configuration for Pico#1 <-> Pico#2 link */
 #define HILS_UART_INSTANCE      uart0
-#define HILS_UART_BAUDRATE      2000000   /* 2 Mbps */
+#define HILS_UART_BAUDRATE      4000000   /* 4 Mbps — stable between RP2040s (same PLL) */
 #define HILS_UART_PIN_TX        0         /* Pico#1 TX → Pico#2 RX */
 #define HILS_UART_PIN_RX        1         /* Pico#2 RX ← Pico#1 TX */
 

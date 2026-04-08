@@ -176,6 +176,9 @@ int tud_video_commit_cb(uint_fast8_t ctl_idx, uint_fast8_t stm_idx,
     if (idx >= 1 && idx <= NUM_FRAME_SIZES) {
         current_width  = frame_sizes[idx].w;
         current_height = frame_sizes[idx].h;
+        /* Discard stale frames from previous resolution */
+        has_real_frame = false;
+        frame_buffer_get_read_buf()->ready = false;
         /* Notify ROS2 node of resolution change via Pico#1 */
         send_resolution_cmd(current_width, current_height, idx);
     }
