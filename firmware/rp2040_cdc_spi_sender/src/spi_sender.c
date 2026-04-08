@@ -37,6 +37,5 @@ bool spi_sender_send_frame(const uint8_t *jpeg_data, uint32_t jpeg_len) {
     uart_write_blocking(HILS_UART_INSTANCE, jpeg_data, jpeg_len);
     uart_write_blocking(HILS_UART_INSTANCE, &checksum, 1);
 
-    gpio_xor_mask(1u << LED_PIN);
     return true;
 }

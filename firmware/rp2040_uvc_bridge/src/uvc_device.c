@@ -17,10 +17,13 @@
 #include "blank_jpeg.h"
 
 /* Dedicated UVC transmit buffer - TinyUSB reads from this during transfer,
- * completely independent of the UART receiver's double buffers. */
+ * completely independent of the UART receiver's double buffers.
+ * Once a real frame is received, uvc_tx_buf holds the latest frame and is
+ * re-sent continuously until a new frame arrives. */
 #define UVC_TX_BUF_SIZE  FRAME_BUF_SIZE
 static uint8_t uvc_tx_buf[UVC_TX_BUF_SIZE];
 static uint32_t uvc_tx_len = 0;
+static bool has_real_frame = false;  /* true once first UART frame received */
 
 static volatile unsigned tx_busy = 0;
 static unsigned already_sent = 0;
@@ -59,26 +62,32 @@ void video_task(void) {
         return;
     }
 
+    /* Check for new frame from UART receiver */
     frame_buf_t *rbuf = frame_buffer_get_read_buf();
-
     if (rbuf->ready && rbuf->length > 0) {
         uvc_tx_len = rbuf->length;
         memcpy(uvc_tx_buf, rbuf->data, uvc_tx_len);
         rbuf->ready = false;
+        if (!has_real_frame) {
+            has_real_frame = true;
+            printf("[UVC] first real frame received (%lu bytes)\n", (unsigned long)uvc_tx_len);
+        }
+    }
 
-        tx_busy = 1;
-        if (!tud_video_n_frame_xfer(0, 0, (void *)uvc_tx_buf, uvc_tx_len)) {
-            tx_busy = 0;
-            printf("[UVC] xfer FAIL (uart frame %lu bytes)\n", (unsigned long)uvc_tx_len);
-        }
+    /* Send: latest real frame if available, otherwise blank JPEG */
+    const void *send_buf;
+    uint32_t send_len;
+    if (has_real_frame) {
+        send_buf = uvc_tx_buf;
+        send_len = uvc_tx_len;
     } else {
-        tx_busy = 1;
-        if (!tud_video_n_frame_xfer(0, 0, (void *)blank_jpeg_640x480, sizeof(blank_jpeg_640x480))) {
-            tx_busy = 0;
-            if (frame_count == 0) {
-                printf("[UVC] xfer FAIL (blank jpeg)\n");
-            }
-        }
+        send_buf = blank_jpeg_640x480;
+        send_len = sizeof(blank_jpeg_640x480);
+    }
+
+    tx_busy = 1;
+    if (!tud_video_n_frame_xfer(0, 0, (void *)send_buf, send_len)) {
+        tx_busy = 0;
     }
 }
 
