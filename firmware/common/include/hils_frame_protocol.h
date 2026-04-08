@@ -61,4 +61,23 @@ static inline void hils_build_header(hils_frame_header_t *hdr, uint32_t payload_
     hdr->payload_length = payload_len;
 }
 
+/*
+ * Reverse-channel command: resolution change notification
+ *
+ * Sent from Pico#2 -> Pico#1 -> ROS2 node when the UVC host
+ * selects a new resolution. Uses the same AA 55 framing.
+ * JPEG payloads always start with 0xFF (SOI), so msg_type=0x01
+ * is unambiguous.
+ */
+#define HILS_MSG_TYPE_RESOLUTION_CMD  0x01
+
+typedef struct __attribute__((packed)) {
+    uint8_t  msg_type;       /* HILS_MSG_TYPE_RESOLUTION_CMD */
+    uint16_t width;          /* little-endian */
+    uint16_t height;         /* little-endian */
+    uint8_t  frame_index;    /* UVC bFrameIndex (1-based) */
+} hils_resolution_cmd_t;
+
+#define HILS_RESOLUTION_CMD_SIZE  sizeof(hils_resolution_cmd_t)
+
 #endif /* HILS_FRAME_PROTOCOL_H */

@@ -2,7 +2,7 @@
  * USB Descriptors for HILS UVC Camera (Pico#2)
  *
  * Based on TinyUSB examples/device/video_capture (struct-based approach).
- * Configured for MJPEG 640x480 streaming over USB Full-Speed isochronous.
+ * Configured for MJPEG streaming with multiple resolutions over USB Full-Speed.
  */
 
 #include "bsp/board_api.h"
@@ -77,7 +77,9 @@ typedef struct TU_ATTR_PACKED {
     tusb_desc_interface_t                         itf;      /* Alt 0: zero-bandwidth */
     tusb_desc_video_streaming_input_header_1byte_t header;
     tusb_desc_video_format_mjpeg_t                format;
-    tusb_desc_video_frame_mjpeg_continuous_t       frame;
+    tusb_desc_video_frame_mjpeg_continuous_t       frame_320x240;
+    tusb_desc_video_frame_mjpeg_continuous_t       frame_640x480;
+    tusb_desc_video_frame_mjpeg_continuous_t       frame_1280x720;
     tusb_desc_video_streaming_color_matching_t     color;
     tusb_desc_interface_t                         itf_alt;  /* Alt 1: operational */
     tusb_desc_endpoint_t                          ep;
@@ -193,31 +195,72 @@ static const uvc_cfg_desc_t desc_fs_configuration = {
             .bDescriptorType       = TUSB_DESC_CS_INTERFACE,
             .bDescriptorSubType    = VIDEO_CS_ITF_VS_FORMAT_MJPEG,
             .bFormatIndex          = 1,
-            .bNumFrameDescriptors  = 1,
+            .bNumFrameDescriptors  = NUM_FRAME_SIZES,
             .bmFlags               = 0,
-            .bDefaultFrameIndex    = 1,
+            .bDefaultFrameIndex    = DEFAULT_FRAME_INDEX,
             .bAspectRatioX         = 0,
             .bAspectRatioY         = 0,
             .bmInterlaceFlags      = 0,
             .bCopyProtect          = 0,
         },
-        .frame = {
+        /* Frame 1: 320x240 */
+        .frame_320x240 = {
             .bLength                  = sizeof(tusb_desc_video_frame_mjpeg_continuous_t),
             .bDescriptorType          = TUSB_DESC_CS_INTERFACE,
             .bDescriptorSubType       = VIDEO_CS_ITF_VS_FRAME_MJPEG,
-            .bFrameIndex              = 1,
+            .bFrameIndex              = FRAME_INDEX_320x240,
             .bmCapabilities           = 0,
-            .wWidth                   = FRAME_WIDTH,
-            .wHeight                  = FRAME_HEIGHT,
-            .dwMinBitRate             = 30000 * 8 * 1,    /* ~30KB/frame * 1fps */
-            .dwMaxBitRate             = 30000 * 8 * FRAME_RATE, /* ~30KB/frame * 15fps */
-            .dwMaxVideoFrameBufferSize = 65536,           /* max MJPEG frame size */
+            .wWidth                   = 320,
+            .wHeight                  = 240,
+            .dwMinBitRate             = 10000 * 8 * 1,
+            .dwMaxBitRate             = 10000 * 8 * FRAME_RATE,
+            .dwMaxVideoFrameBufferSize = 65536,
             .dwDefaultFrameInterval   = 10000000 / FRAME_RATE,
             .bFrameIntervalType       = 0, /* continuous */
             .dwFrameInterval          = {
-                10000000 / FRAME_RATE,               /* min interval */
-                10000000,                             /* max interval (1 fps) */
-                10000000 / FRAME_RATE,               /* step */
+                10000000 / FRAME_RATE,
+                10000000,
+                10000000 / FRAME_RATE,
+            },
+        },
+        /* Frame 2: 640x480 (default) */
+        .frame_640x480 = {
+            .bLength                  = sizeof(tusb_desc_video_frame_mjpeg_continuous_t),
+            .bDescriptorType          = TUSB_DESC_CS_INTERFACE,
+            .bDescriptorSubType       = VIDEO_CS_ITF_VS_FRAME_MJPEG,
+            .bFrameIndex              = FRAME_INDEX_640x480,
+            .bmCapabilities           = 0,
+            .wWidth                   = 640,
+            .wHeight                  = 480,
+            .dwMinBitRate             = 30000 * 8 * 1,
+            .dwMaxBitRate             = 30000 * 8 * FRAME_RATE,
+            .dwMaxVideoFrameBufferSize = 65536,
+            .dwDefaultFrameInterval   = 10000000 / FRAME_RATE,
+            .bFrameIntervalType       = 0,
+            .dwFrameInterval          = {
+                10000000 / FRAME_RATE,
+                10000000,
+                10000000 / FRAME_RATE,
+            },
+        },
+        /* Frame 3: 1280x720 */
+        .frame_1280x720 = {
+            .bLength                  = sizeof(tusb_desc_video_frame_mjpeg_continuous_t),
+            .bDescriptorType          = TUSB_DESC_CS_INTERFACE,
+            .bDescriptorSubType       = VIDEO_CS_ITF_VS_FRAME_MJPEG,
+            .bFrameIndex              = FRAME_INDEX_1280x720,
+            .bmCapabilities           = 0,
+            .wWidth                   = 1280,
+            .wHeight                  = 720,
+            .dwMinBitRate             = 80000 * 8 * 1,
+            .dwMaxBitRate             = 80000 * 8 * FRAME_RATE,
+            .dwMaxVideoFrameBufferSize = 65536,
+            .dwDefaultFrameInterval   = 10000000 / FRAME_RATE,
+            .bFrameIntervalType       = 0,
+            .dwFrameInterval          = {
+                10000000 / FRAME_RATE,
+                10000000,
+                10000000 / FRAME_RATE,
             },
         },
         .color = {

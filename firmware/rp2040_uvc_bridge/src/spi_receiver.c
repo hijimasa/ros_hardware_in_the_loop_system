@@ -45,7 +45,7 @@ void spi_receiver_init(void) {
     /* Initialize UART */
     uart_init(HILS_UART_INSTANCE, HILS_UART_BAUDRATE);
     gpio_set_function(HILS_UART_PIN_RX, GPIO_FUNC_UART);
-    /* TX pin not needed on receiver side */
+    gpio_set_function(HILS_UART_PIN_TX, GPIO_FUNC_UART);  /* TX for reverse-channel commands */
 
     /* Disable UART FIFO to get byte-by-byte DMA triggers */
     uart_set_fifo_enabled(HILS_UART_INSTANCE, false);

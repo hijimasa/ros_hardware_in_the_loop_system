@@ -111,19 +111,42 @@ int main(void) {
     spi_sender_init();
     reset_state_machine();
 
+    /* Reverse channel buffer (commands from Pico#2) */
+    uint8_t rev_cmd[64];
+    uint32_t rev_len;
+
     while (1) {
-        /* Bulk read from USB CDC via stdio_usb_in_chars (up to 4KB at a time) */
+        /* Forward path: CDC RX -> UART TX */
         int count = stdio_usb_in_chars((char *)cdc_buf, CDC_BUF_SIZE);
-        if (count <= 0) {
-            continue;
+        if (count > 0) {
+            for (int i = 0; i < count; i++) {
+                if (process_byte(cdc_buf[i])) {
+                    spi_sender_send_frame(rx_payload, payload_length);
+                    frame_count++;
+                    gpio_xor_mask(1u << LED_PIN);
+                }
+            }
         }
 
-        for (int i = 0; i < count; i++) {
-            if (process_byte(cdc_buf[i])) {
-                spi_sender_send_frame(rx_payload, payload_length);
-                frame_count++;
-                gpio_xor_mask(1u << LED_PIN);
+        /* Reverse path: UART RX -> CDC TX (re-framed) */
+        if (spi_sender_poll_reverse(rev_cmd, &rev_len)) {
+            /* Re-frame the command and send via CDC to PC */
+            hils_frame_header_t hdr;
+            hils_build_header(&hdr, rev_len);
+            uint8_t checksum = hils_compute_checksum(rev_cmd, rev_len);
+
+            const uint8_t *parts[] = {
+                (const uint8_t *)&hdr, rev_cmd, &checksum
+            };
+            uint32_t sizes[] = {
+                sizeof(hdr), rev_len, 1
+            };
+            for (int p = 0; p < 3; p++) {
+                for (uint32_t j = 0; j < sizes[p]; j++) {
+                    putchar_raw(parts[p][j]);
+                }
             }
+            stdio_flush();
         }
     }
 
