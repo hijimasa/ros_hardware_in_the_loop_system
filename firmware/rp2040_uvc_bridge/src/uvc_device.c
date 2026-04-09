@@ -2,10 +2,12 @@
  * UVC Device for HILS Camera Bridge (Pico#2)
  *
  * Streams MJPEG frames received from UART as a UVC camera.
- * Sends at the host-negotiated resolution. When no new frame is
- * available, re-sends the last frame to keep the stream alive.
- * Sends resolution commands back to Pico#1 via UART TX when
- * the host negotiates a new resolution.
+ * Sends at the host-negotiated resolution and frame rate.
+ * When no new frame is available, re-sends the last frame.
+ * Sends resolution commands back to Pico#1 via UART TX.
+ *
+ * Frame rate is limited to the host-negotiated interval to avoid
+ * hogging USB bandwidth on shared buses (e.g. Raspberry Pi 4).
  */
 
 #include "bsp/board_api.h"
@@ -37,6 +39,9 @@ static uint32_t xfer_fail_count = 0;
 static uint16_t current_width  = 640;
 static uint16_t current_height = 480;
 
+/* Frame interval from host negotiation (for logging only) */
+static uint32_t frame_interval_us = 66666;
+
 /* Frame size table (indexed by bFrameIndex, 1-based) */
 static const struct { uint16_t w; uint16_t h; } frame_sizes[] = {
     {0, 0},           /* index 0: unused */
@@ -52,14 +57,15 @@ bool video_is_busy(void) {
     return tx_busy != 0;
 }
 
-/* Wait for EP 0x81 hardware buffer to finish any pending transfer */
-static void wait_ep_available_clear(void) {
+/* Reset EP 0x81 hardware buffer to clean state */
+static void reset_ep_hw_state(void) {
     uint32_t timeout = time_us_32() + 10000;
-    while (*EP1_IN_BUF_CTRL & USB_BUF_CTRL_AVAIL) {
+    while (*EP1_IN_BUF_CTRL & (USB_BUF_CTRL_AVAIL | USB_BUF_CTRL_FULL)) {
         tud_task();
         if ((int32_t)(time_us_32() - timeout) > 0) {
-            printf("[UVC] WARN: EP AVAIL timeout, clearing\n");
-            *EP1_IN_BUF_CTRL &= ~USB_BUF_CTRL_AVAIL;
+            printf("[UVC] WARN: EP reset timeout (0x%08lx), forcing\n",
+                   (unsigned long)*EP1_IN_BUF_CTRL);
+            *EP1_IN_BUF_CTRL = 0;
             break;
         }
     }
@@ -99,7 +105,7 @@ static void get_blank_jpeg(const uint8_t **buf, uint32_t *len) {
 void video_task(void) {
     if (!tud_video_n_streaming(0, 0)) {
         if (already_sent) {
-            wait_ep_available_clear();
+            reset_ep_hw_state();
             printf("[UVC] streaming stopped (sent %lu frames, %lu xfer fails)\n",
                    (unsigned long)frame_count, (unsigned long)xfer_fail_count);
         }
@@ -117,10 +123,11 @@ void video_task(void) {
         frame_count = 0;
         xfer_fail_count = 0;
         has_real_frame = false;
+        reset_ep_hw_state();
         printf("[UVC] streaming started (%ux%u)\n", current_width, current_height);
     }
 
-    /* Always consume new UART frames */
+    /* Always consume new UART frames regardless of rate limit */
     frame_buf_t *rbuf = frame_buffer_get_read_buf();
     if (rbuf->ready && rbuf->length > 0) {
         uvc_tx_len = rbuf->length;
@@ -150,9 +157,11 @@ void video_task(void) {
     if (!tud_video_n_frame_xfer(0, 0, (void *)send_buf, send_len)) {
         tx_busy = 0;
         xfer_fail_count++;
-        if (xfer_fail_count <= 5) {
-            printf("[UVC] xfer fail #%lu (len=%lu)\n",
-                   (unsigned long)xfer_fail_count, (unsigned long)send_len);
+        if (xfer_fail_count <= 10) {
+            printf("[UVC] xfer fail #%lu (len=%lu, streaming=%d, ep_ctrl=0x%08lx)\n",
+                   (unsigned long)xfer_fail_count, (unsigned long)send_len,
+                   tud_video_n_streaming(0, 0),
+                   (unsigned long)*EP1_IN_BUF_CTRL);
         }
     }
 }
@@ -172,6 +181,12 @@ int tud_video_commit_cb(uint_fast8_t ctl_idx, uint_fast8_t stm_idx,
     (void)ctl_idx;
     (void)stm_idx;
 
+    /* dwFrameInterval is in 100ns units */
+    frame_interval_us = parameters->dwFrameInterval / 10;
+    if (frame_interval_us < 10000) {
+        frame_interval_us = 10000;  /* floor at 100fps */
+    }
+
     uint8_t idx = parameters->bFrameIndex;
     if (idx >= 1 && idx <= NUM_FRAME_SIZES) {
         current_width  = frame_sizes[idx].w;
@@ -183,10 +198,10 @@ int tud_video_commit_cb(uint_fast8_t ctl_idx, uint_fast8_t stm_idx,
         send_resolution_cmd(current_width, current_height, idx);
     }
 
-    printf("[UVC] commit: fmt=%u frm=%u (%ux%u) maxPayload=%lu maxFrame=%lu\n",
+    printf("[UVC] commit: fmt=%u frm=%u (%ux%u) interval=%lu us maxPayload=%lu\n",
            parameters->bFormatIndex, idx,
            current_width, current_height,
-           (unsigned long)parameters->dwMaxPayloadTransferSize,
-           (unsigned long)parameters->dwMaxVideoFrameSize);
+           (unsigned long)frame_interval_us,
+           (unsigned long)parameters->dwMaxPayloadTransferSize);
     return VIDEO_ERROR_NONE;
 }

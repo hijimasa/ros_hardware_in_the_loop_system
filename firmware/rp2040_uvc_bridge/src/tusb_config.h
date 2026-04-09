@@ -42,8 +42,8 @@ extern "C" {
 /* ---- Video ---- */
 #define CFG_TUD_VIDEO              1
 #define CFG_TUD_VIDEO_STREAMING    1
-#define CFG_TUD_VIDEO_STREAMING_EP_BUFSIZE  1023  /* FS isochronous max */
-#define CFG_TUD_VIDEO_STREAMING_BULK  0  /* Use isochronous */
+#define CFG_TUD_VIDEO_STREAMING_EP_BUFSIZE  256   /* ISO: 17% FS bandwidth, leaves room for HID */
+#define CFG_TUD_VIDEO_STREAMING_BULK  0   /* Isochronous */
 
 #ifdef __cplusplus
 }
