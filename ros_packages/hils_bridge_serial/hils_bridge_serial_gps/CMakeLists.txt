@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(hils_bridge_lidar_velodyne)
+project(hils_bridge_serial_gps)
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -9,9 +9,9 @@ ament_python_install_package(${PROJECT_NAME})
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
 install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/config)
 install(PROGRAMS
-  hils_bridge_lidar_velodyne/velodyne_emulator_node.py
+  hils_bridge_serial_gps/gps_bridge_node.py
   DESTINATION lib/${PROJECT_NAME}
-  RENAME velodyne_emulator_node
+  RENAME gps_bridge_node
 )
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

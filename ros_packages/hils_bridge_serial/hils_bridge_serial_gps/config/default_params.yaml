@@ -1,0 +1,8 @@
+hils_gps_bridge:
+  ros__parameters:
+    serial_port: /dev/ttyUSB0
+    baudrate: 9600
+    max_hz: 10.0
+    fix_topic: /gps/fix
+    vel_topic: /gps/vel
+    enable_velocity: true

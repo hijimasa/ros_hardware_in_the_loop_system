@@ -1,0 +1,46 @@
+;
+; PIO I2C Slave program (stub)
+;
+; This firmware uses the RP2040's hardware I2C peripheral in slave mode
+; instead of PIO for I2C slave emulation. The hardware I2C peripheral
+; handles the I2C protocol (START/STOP detection, ACK/NACK, clock
+; stretching) automatically and is simpler and more reliable for
+; standard I2C slave operation.
+;
+; This stub PIO program is provided for future use cases where PIO-based
+; I2C slave would be needed, such as:
+;   - Non-standard I2C addresses or multi-address slave
+;   - Multiple I2C slaves on different pin pairs (RP2040 has only 2 I2C HW)
+;   - Custom I2C protocol variations (e.g., SMBus PEC, 10-bit addressing)
+;   - Bit-level timing control beyond what hardware I2C provides
+;
+; A full PIO I2C slave implementation would need to:
+;   1. Monitor SDA while SCL is high for START condition (SDA falling edge)
+;   2. Shift in 8 bits on SCL rising edges (address + R/W bit)
+;   3. Compare address and send ACK (pull SDA low on 9th clock)
+;   4. For writes: shift in data bytes, ACK each
+;   5. For reads: shift out data bytes from register map
+;   6. Monitor for STOP condition (SDA rising edge while SCL high)
+;
+; Reference: See pico-sdk examples/pio/i2c for PIO I2C master implementation.
+; A slave implementation would invert the clock/data direction logic.
+;
+
+.program i2c_slave_stub
+
+; Placeholder: wait forever (not used in current firmware)
+.wrap_target
+    nop [31]
+.wrap
+
+% c-sdk {
+static inline void i2c_slave_stub_program_init(PIO pio, uint sm, uint offset,
+                                                 uint sda_pin, uint scl_pin) {
+    /* This is a stub. The actual I2C slave uses hardware I2C, not PIO. */
+    (void)pio;
+    (void)sm;
+    (void)offset;
+    (void)sda_pin;
+    (void)scl_pin;
+}
+%}

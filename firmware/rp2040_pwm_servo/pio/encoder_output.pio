@@ -1,0 +1,58 @@
+;
+; PIO Quadrature Encoder Output program
+;
+; Outputs A/B quadrature encoder signals on two consecutive pins.
+; Pin mapping: base_pin = A, base_pin+1 = B
+;
+; Design: The C code computes the correct A/B states for each
+; quadrature step and pushes them into the TX FIFO. The PIO
+; simply outputs each 2-bit value at a controlled rate.
+;
+; This keeps the PIO program simple and lets C handle the
+; quadrature state machine and direction logic.
+;
+; Each FIFO entry contains the 2-bit pin state in bits [1:0]:
+;   bit 0 = A channel
+;   bit 1 = B channel
+;
+; The clock divider controls the encoder step rate.
+;
+
+.program encoder_output
+
+.wrap_target
+    pull block              ; Wait for next A/B state from C code
+    out pins, 2             ; Output A and B pins
+.wrap
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+static inline void encoder_output_program_init(PIO pio, uint sm, uint offset,
+                                                uint pin_a, float step_freq_hz) {
+    pio_sm_config c = encoder_output_program_get_default_config(offset);
+
+    // OUT pins: 2 consecutive pins (A, B)
+    sm_config_set_out_pins(&c, pin_a, 2);
+
+    // Initialize GPIOs for PIO
+    pio_gpio_init(pio, pin_a);
+    pio_gpio_init(pio, pin_a + 1);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin_a, 2, true);  // Output
+
+    // Clock divider for step rate
+    // Each loop iteration = 2 instructions (pull + out)
+    // Target: one step per (1/step_freq_hz) seconds
+    float div = (float)clock_get_hz(clk_sys) / (step_freq_hz * 2.0f);
+    if (div < 1.0f) div = 1.0f;
+    if (div > 65535.0f) div = 65535.0f;
+    sm_config_set_clkdiv(&c, div);
+
+    // Shift right, no autopull, 32-bit threshold
+    sm_config_set_out_shift(&c, true, false, 32);
+
+    // Load configuration and enable
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
