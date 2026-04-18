@@ -17,7 +17,8 @@ RUN apt-get update -y -qq && \
       software-properties-common \
       git wget curl unzip \
       python3-pip \
-      libopencv-dev libeigen3-dev && \
+      libopencv-dev libeigen3-dev \
+      libpcap-dev libyaml-cpp-dev && \
     apt-get autoremove -y -qq && \
     rm -rf /var/lib/apt/lists/*
 
