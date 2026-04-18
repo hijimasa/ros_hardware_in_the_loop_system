@@ -1,0 +1,10 @@
+(sym_lib_table
+	(version 7)
+	(lib
+		(name "hils_modules")
+		(type "KiCad")
+		(uri "${KIPRJMOD}/hils_modules.kicad_sym")
+		(options "")
+		(descr "HILS project local module symbols")
+	)
+)
