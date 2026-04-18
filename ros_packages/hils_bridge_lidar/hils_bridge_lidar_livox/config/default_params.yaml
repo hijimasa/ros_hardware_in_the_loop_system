@@ -1,0 +1,28 @@
+/**:
+  ros__parameters:
+    # USB CDC serial port to W5500-EVB-Pico2
+    serial_port: "/dev/ttyACM0"
+
+    # ROS topics to subscribe
+    pointcloud_topic: "/livox/lidar"
+    imu_topic: "/livox/imu"
+
+    # Enable IMU data forwarding
+    enable_imu: true
+
+    # Max point cloud publish rate (Hz) - matches livox_ros_driver2 default
+    max_hz: 10.0
+
+    # Max points per HILS frame (USB CDC bandwidth limit)
+    # Mid360: ~200k pts/s. At 10 Hz = 20k pts/frame.
+    # USB Full Speed CDC: ~800 KB/s → ~57k pts/s (14 bytes/pt)
+    # Reduce if USB bandwidth is insufficient.
+    max_points_per_frame: 4600
+
+    # Point data type: 1=CartesianHigh (14 bytes/pt), 2=CartesianLow (8 bytes/pt)
+    point_data_type: 1
+
+    # Livox emulator network config (sent to firmware at startup)
+    lidar_ip: "192.168.1.12"
+    host_ip: "192.168.1.5"
+    serial_number: "0TFDFH600100511"
