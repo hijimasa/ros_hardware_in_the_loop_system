@@ -1,0 +1,3 @@
+[submodule "ros2_hils_bridge"]
+	path = ros2_hils_bridge
+	url = https://github.com/hijimasa/ros2_hils_bridge.git

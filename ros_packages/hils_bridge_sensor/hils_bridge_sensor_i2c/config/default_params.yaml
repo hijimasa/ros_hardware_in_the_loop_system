@@ -1,6 +1,0 @@
-hils_i2c_sensor_bridge:
-  ros__parameters:
-    serial_port: /dev/ttyACM0
-    baudrate: 115200
-    max_hz: 100.0
-    imu_topic: /imu/data
