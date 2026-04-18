@@ -1,0 +1,115 @@
+# HILS 拡張ロードマップ
+
+## 概要
+
+UVCカメラ（RP2040）およびLivox Mid-360（純ソフトウェア）のHILSが安定動作したことを受け、対応デバイスを拡張する。2つの方面で並行して進める。
+
+---
+
+## 2方面戦略
+
+### 方面A: PC開発者向け（純ソフトウェア、マイコン不要）
+
+USBシリアル接続・LAN接続のデバイスプロトコルを拡充し、PCベースのROS2ロボット開発者が安価にHILSを導入できるようにする。
+
+| 優先度 | ターゲット | 方式 | ハードウェア | 依存 |
+|--------|-----------|------|------------|------|
+| **A1** | GPS (NMEA) | FT234X × 2 クロス接続 | FT234X 800円 | serial_bridge_base |
+| **A2** | Velodyne VLP-16 | USB-LANアダプタ + UDP | USB-LANアダプタ ~1,000円 | udp_emulator_base |
+| **A3** | シリアルIMU (Witmotion等) | FT234X × 2 クロス接続 | FT234X 800円 | serial_bridge_base |
+| **A4** | Ouster OS1 | USB-LANアダプタ + UDP | USB-LANアダプタ ~1,000円 | udp_emulator_base |
+
+### 方面B: マイコン開発者向け（RP2040ファームウェア）
+
+PWM/I2C/SPIインターフェースを模擬し、Arduino/RP2040でロボットを開発するユーザーにもHILSを訴求する。
+
+| 優先度 | ターゲット | 方式 | ハードウェア | 依存 |
+|--------|-----------|------|------------|------|
+| **B1** | PWMサーボ | RP2040 PIO パルス生成 | Pico H 920円 | CDC受信 + PIO |
+| **B2** | エンコーダ出力 | RP2040 PIO A/B相出力 | B1と同一Pico | PIO |
+| **B3** | I2C IMU (MPU-6050) | RP2040 PIO I2Cスレーブ | Pico H 920円 | レジスタマップ実装 |
+| **B4** | SPI距離センサ (VL53L0X等) | RP2040 PIO SPIスレーブ | B3と同一Pico | レジスタマップ実装 |
+
+---
+
+## 実行フェーズ
+
+### Phase 0: 共通基盤整備
+
+両方面の前提となる共通モジュールを `hils_bridge_base` パッケージに整備する。
+
+| モジュール | 内容 | 移動元/新規 |
+|-----------|------|------------|
+| `frame_protocol.py` | フレームプロトコル ビルダー/パーサー | camera_uvc から移動 |
+| `network_utils.py` | IP検出・インターフェースバインド・サブネット検証 | livox_emulator_node から抽出 |
+| `serial_bridge_base.py` | FT234Xクロス接続向けシリアルブリッジ基底クラス | 新規 |
+| `udp_emulator_base.py` | UDP機器エミュレータ基底クラス（ソケット管理、レート制御、統計） | livox_emulator_node から抽出 |
+
+**既存ノードの更新:**
+- `livox_emulator_node.py` → `network_utils`, `udp_emulator_base` を利用
+- `uvc_bridge_node.py` → `frame_protocol` を `hils_bridge_base` から import
+
+### Phase 1: 並行開発（3エージェント）
+
+Phase 0完了後、以下を並行して進められる：
+
+```
+Agent 1: GPS NMEA bridge (A1)
+  - hils_bridge_serial/hils_bridge_serial_gps/
+  - serial_bridge_base を継承
+  - NMEAセンテンス生成 ($GPGGA, $GPRMC, $GPVTG)
+  - NavSatFix → NMEA変換
+
+Agent 2: Velodyne VLP-16 emulator (A2)
+  - hils_bridge_lidar/hils_bridge_lidar_velodyne/
+  - udp_emulator_base を継承
+  - VLP-16パケットフォーマット (port 2368/8308)
+  - PointCloud2 → Velodyne UDP変換
+
+Agent 3: PWMサーボ + エンコーダ (B1+B2)
+  - firmware/rp2040_pwm_servo/
+  - ros_packages/hils_bridge_actuator/hils_bridge_actuator_pwm/
+  - PIOプログラム + CDCブリッジノード
+```
+
+### Phase 2: 横展開
+
+Phase 1のパターンを流用して残りのデバイスに横展開：
+
+- A3 (シリアルIMU): A1のserial_bridge_baseパターンを利用、バイナリプロトコル対応
+- A4 (Ouster OS1): A2のudp_emulator_baseパターンを利用
+- B3 (I2C IMU): B1/B2のファームウェアパターンを利用、PIO I2Cスレーブ
+- B4 (SPI距離センサ): B3と同様
+
+---
+
+## パッケージ構成（完成時）
+
+```
+ros_packages/
+├── hils_bridge_base/                    # 共通基盤 (Phase 0)
+│   └── hils_bridge_base/
+│       ├── frame_protocol.py
+│       ├── network_utils.py
+│       ├── serial_bridge_base.py
+│       └── udp_emulator_base.py
+├── hils_bridge_camera/
+│   └── hils_bridge_camera_uvc/          # 実装済み
+├── hils_bridge_lidar/
+│   ├── hils_bridge_lidar_livox/         # 実装済み
+│   ├── hils_bridge_lidar_velodyne/      # Phase 1 (A2)
+│   └── hils_bridge_lidar_ouster/        # Phase 2 (A4)
+├── hils_bridge_serial/                  # 新規カテゴリ
+│   ├── hils_bridge_serial_gps/          # Phase 1 (A1)
+│   └── hils_bridge_serial_imu/          # Phase 2 (A3)
+├── hils_bridge_actuator/                # 新規カテゴリ
+│   └── hils_bridge_actuator_pwm/        # Phase 1 (B1+B2)
+└── hils_bridge_sensor/                  # 新規カテゴリ
+    └── hils_bridge_sensor_i2c/          # Phase 2 (B3+B4)
+
+firmware/
+├── rp2040_uvc_bridge/                   # 実装済み
+├── rp2040_cdc_spi_sender/               # 実装済み
+├── rp2040_pwm_servo/                    # Phase 1 (B1+B2)
+└── rp2040_i2c_slave/                    # Phase 2 (B3+B4)
+```

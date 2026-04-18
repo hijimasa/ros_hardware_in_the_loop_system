@@ -28,7 +28,7 @@ from rcl_interfaces.msg import ParameterDescriptor, IntegerRange, SetParametersR
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 
-from hils_bridge_camera_uvc import frame_protocol
+from hils_bridge_base import frame_protocol
 
 
 class UvcBridgeNode(Node):
