@@ -23,12 +23,6 @@ install(DIRECTORY config/
 
 # Install executables
 install(PROGRAMS
-  hils_bridge_lidar_livox/livox_bridge_node.py
-  DESTINATION lib/${PROJECT_NAME}
-  RENAME livox_bridge_node
-)
-
-install(PROGRAMS
   hils_bridge_lidar_livox/livox_emulator_node.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME livox_emulator_node
