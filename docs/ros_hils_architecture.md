@@ -1,4 +1,4 @@
-# ROS Hardware-in-the-Loop Simulation (HILS) アーキテクチャ検討
+# ROS Hardware-in-the-Loop Simulation (HILS) アーキテクチャ
 
 ## 1. 背景：ロボット開発におけるHILSの現状
 
@@ -35,367 +35,252 @@ dSPACE、NI VeriStand、Speedgoat、Typhoon HILなどの商用HILプラットフ
 
 ---
 
-## 2. センサ・アクチュエータ別 HILS実現方式
+## 2. 設計方針：インターフェース種別ごとに最適な方式を選択
 
-### 2.1 設計方針：全デバイスをUSBハブ経由のRP2040で統一
+### 2.1 方針の変遷
 
-本プロジェクトでは、**すべてのセンサ・アクチュエータエミュレーションをRP2040経由のUSB接続で統一する**方針をとる。
+初期の設計では「全デバイスをRP2040経由のUSB接続で統一」する方針を検討していた。しかし、プロトタイプ検証を通じて、インターフェース種別ごとに最適な方式が異なることが判明した。
 
-**理由：**
-- 3D LiDARを複数使用する場合、LAN直結方式ではLANポートが台数分必要になるが、通常のPCはLANポートを1つしか持たない
-- USBハブ経由であれば、エミュレーション対象デバイスが増えてもRP2040を追加接続するだけでスケール可能
-- 全デバイスのインターフェースが統一されることで、HILS環境の構築・管理が容易になる
-- カメラについても、GStreamer等でLAN経由にすると物理層がEthernetに変わってしまい、実機のUSBカメラとは異なる通信経路になるためHILSの意義が薄れる
+**現在の方針：マイコンが本当に必要な箇所にのみマイコンを使い、それ以外は既存のUSBデバイスやソフトウェアエミュレーションで代用する。**
+
+| インターフェース | 当初の方式 | 現在の方式 | 変更理由 |
+|----------------|-----------|-----------|---------|
+| シリアルセンサ (UART) | RP2040 USB-CDC | FT234Xクロス接続 | マイコン不要。2個のFT234XをTX/RXクロスで接続し、両PCにシリアルポートとして認識させる |
+| Ethernet接続デバイス (LiDAR等) | RP2040 + W5500 | USB-LANアダプタ + 純ソフトウェアエミュレーション | USB CDC帯域がボトルネック。USB-LANアダプタの方がシンプルかつ高性能 |
+| USBカメラ (UVC) | RP2040 (TinyUSB UVC) | RP2040 (TinyUSB UVC) **変更なし** | UVCデバイスクラスのエミュレーションにはマイコンが必要 |
 
 ### 2.2 全体アーキテクチャ
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        シミュレーションPC                                  │
-│                                                                         │
-│  ┌──────────┐   ROSトピック    ┌──────────────────────────────────┐     │
-│  │ Gazebo / │ ──────────────> │ HILS Bridge Node                 │     │
-│  │ Unity /  │   /scan          │ (トピック→デバイスプロトコル変換)   │     │
-│  │ Isaac Sim│                  │                                  │     │
-│  │          │   /image_raw     │                                  │     │
-│  │          │   /imu/data      │  各RP2040へUSB経由でデータ送信    │     │
-│  │          │   /gps/fix       │                                  │     │
-│  │          │   /cmd_vel       └───────┬──────────────────────────┘     │
-│  │          │   /joint_states          │ USB (CDC/Vendor)               │
-│  └──────────┘                          │                                │
-└────────────────────────────────────────┼────────────────────────────────┘
-                                         │
-                                    USB ケーブル
-                                         │
-                                         ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                         RP2040 HILSデバイス群                             │
-│                                                                          │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐      │
-│  │ RP2040 #1        │  │ RP2040 #2        │  │ RP2040 #3        │      │
-│  │ [LiDAR Emu]      │  │ [Camera Emu]     │  │ [GPS/IMU Emu]    │      │
-│  │ USB CDC受信       │  │ USB CDC受信       │  │ USB CDC受信       │      │
-│  │ → W5500          │  │ → TinyUSB UVC    │  │ → TinyUSB CDC    │      │
-│  │ → UDP送信        │  │ → USBカメラ出力   │  │ → UART/シリアル   │      │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘      │
-│           │ Ethernet            │ USB                   │ USB            │
-└───────────┼─────────────────────┼───────────────────────┼────────────────┘
-            │                     │                       │
-            ▼                     ▼                       ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                           実機PC (ROS)                                    │
-│                                                                          │
-│  ┌───────────────┐    ┌──────────────┐    ┌───────────────┐             │
-│  │velodyne_driver│    │usb_cam /     │    │nmea_navsat_   │             │
-│  │(UDP: eth1等)  │    │cv_camera     │    │driver         │             │
-│  └───────┬───────┘    └──────┬───────┘    └───────┬───────┘             │
-│          ▼                   ▼                    ▼                      │
-│       /scan              /image_raw           /gps/fix                   │
-│                                                                          │
-│  ※ USBハブで接続。デバイス追加時はRP2040を増設するだけ                       │
-└──────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          シミュレーションPC                                    │
+│                                                                              │
+│  ┌──────────┐   ROSトピック    ┌──────────────────────────────────────┐      │
+│  │ Gazebo / │ ──────────────> │ HILS Bridge Nodes                    │      │
+│  │ Unity /  │   /scan          │                                      │      │
+│  │ Isaac Sim│   /image_raw     │ ┌────────────────────────────────┐  │      │
+│  │          │   /imu/data      │ │ livox_emulator_node            │  │      │
+│  │          │   /gps/fix       │ │  PointCloud2 → Livox SDK2 UDP  │──┼──┐   │
+│  │          │                  │ │  (USB-LANアダプタ経由で送信)      │  │  │   │
+│  │          │                  │ ├────────────────────────────────┤  │  │   │
+│  │          │                  │ │ uvc_bridge_node                │  │  │   │
+│  │          │                  │ │  image_raw → JPEG → USB CDC    │──┼──┼─┐ │
+│  │          │                  │ ├────────────────────────────────┤  │  │ │ │
+│  │          │                  │ │ gps_bridge_node (将来)          │  │  │ │ │
+│  │          │                  │ │  NavSatFix → NMEA → Serial     │──┼──┼─┼┐│
+│  └──────────┘                  │ └────────────────────────────────┘  │  │ │││
+│                                └──────────────────────────────────────┘  │ │││
+└─────────────────────────────────────────────────────────────────────────┼─┼┼┼┘
+                                                                         │ │││
+                            USB-LANアダプタ (eth1等) ◄────────────────────┘ │││
+                            USB micro-B (CDC) ◄────────────────────────────┘││
+                            FT234X USB-Serial ◄─────────────────────────────┘│
+                            FT234X USB-Serial ◄──────────────────────────────┘
+                                         │ │ │ │
+                                         ▼ ▼ ▼ ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                             実機PC (ROS)                                      │
+│                                                                              │
+│  ┌────────────────┐   ┌────────────────┐   ┌────────────────┐              │
+│  │livox_ros_      │   │usb_cam /       │   │nmea_navsat_    │              │
+│  │driver2         │   │cv_camera       │   │driver          │              │
+│  │(UDP: eth1等)   │   │(/dev/video0)   │   │(/dev/ttyUSB0)  │              │
+│  └───────┬────────┘   └───────┬────────┘   └───────┬────────┘              │
+│          ▼                    ▼                     ▼                        │
+│     /livox/lidar         /image_raw              /gps/fix                    │
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────┐        │
+│  │ RP2040 (Pico#1 + Pico#2) は UVCカメラエミュレーションにのみ使用    │        │
+│  │ LiDAR/シリアルセンサはマイコン不要                                  │        │
+│  └──────────────────────────────────────────────────────────────────┘        │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**スケーラビリティの例：LiDAR 3台構成**
+---
 
-```
-                    USBハブ (実機PC側)
-                    ┌─────┴─────┐
-                    │           │
-          ┌────────┴──┐  ┌────┴────────┐
-          │ USB Eth #1│  │ USB Eth #2  │  ...
-          │ (eth1)    │  │ (eth2)      │
-          └─────┬─────┘  └──────┬──────┘
-                │               │
-  RP2040+W5500 #1    RP2040+W5500 #2    RP2040+W5500 #3
-  (Front LiDAR)      (Left LiDAR)       (Right LiDAR)
-                    ┌─────┬─────┐
-                    │ USBハブ    │
-                    │(シミュPC側)│
-                    └─────┴─────┘
+## 3. センサ・アクチュエータ別 HILS実現方式
 
-※ 通常のPCはLANポート1つだが、USBハブ経由なら容易に拡張可能
-```
-
-### 2.3 シリアルセンサ（UART/USB-CDC）
+### 3.1 シリアルセンサ（UART）— FT234Xクロス接続方式
 
 **対象デバイス：** GPS受信機、一部のIMU、超音波センサ、シリアル接続のモータドライバ
 
-#### GPS受信機エミュレーション（NMEA over UART）
+#### 方式概要
+
+FT234X超小型USBシリアル変換モジュール（秋月 [108461]）を2個使用し、TX/RXをクロス接続（ヌルモデム接続）する。各FT234XをそれぞれシミュレーションPCと実機PCにUSB接続すると、両PC上で `/dev/ttyUSB0` 等のシリアルポートとして認識される。
+
+シミュレーションPC側のブリッジノードは自PC側のFT234Xのシリアルポートに対してNMEA等のプロトコルデータを書き込み、それがクロス接続を経由して実機PC側のFT234Xに到達する。RP2040等のマイコンは一切不要。
+
+```
+シミュレーションPC         FT234X #1      FT234X #2         実機PC
+
+/gps/fix                                                  
+    │                    ┌─────────┐    ┌─────────┐       
+    ▼                    │ FT234X  │    │ FT234X  │       
+HILS Bridge Node         │  TX ──────────── RX    │       
+ - NavSatFix→NMEA変換    │  RX ──────────── TX    │       
+ - シリアルポートに       │         │    │         │       
+   書き込み              │         │    │         │       
+    │                    └────┬────┘    └────┬────┘       
+    └──USB──> /dev/ttyUSB0    │  UART        │   /dev/ttyUSB0 ──> nmea_navsat_driver
+              (シミュPC側)     │  クロス接続   │   (実機PC側)        → /gps/fix
+                              └──────────────┘
+```
+
+**利点：**
+- マイコンのファームウェア開発が不要
+- FT234Xモジュールは1個400円程度と安価（2個で800円）
+- 実機と同じUSBシリアルデバイスとして認識されるため、ドライバとの互換性が高い
+- 複数のシリアルセンサをエミュレーションする場合はFT234Xのペアを追加するだけ
+
+**対応プロトコル例：**
+
+| デバイス | プロトコル | ボーレート | 難易度 |
+|---------|-----------|-----------|--------|
+| GPS受信機 | NMEA 0183 (テキスト) | 9600 / 115200 bps | 非常に容易 |
+| シリアルIMU | バイナリ/ASCII (機種依存) | 115200 bps〜 | 容易〜中程度 |
+| 超音波センサ | テキスト/バイナリ | 9600〜115200 bps | 容易 |
+
+### 3.2 Ethernet接続センサ（3D LiDAR等）— USB-LANアダプタ方式
+
+**対象デバイス：** Livox Mid-360、Velodyne VLP-16、Ouster OS1、各種産業用カメラ
+
+#### 方式概要
+
+USB-LANアダプタをシミュレーションPCに接続し、増設したネットワークインターフェース（eth1等）にLiDARのIPアドレスを割り当てる。純ソフトウェアのエミュレータノードが、そのインターフェース経由でLiDAR互換のUDPパケットを送信する。
+
+```
+シミュレーションPC                                               実機PC
+
+Gazebo/Unity/Isaac Sim
+    │
+    ▼ /points (PointCloud2)
+┌──────────────────┐      USB-LANアダプタ (eth1)        ┌──────────────┐
+│ livox_emulator_  │      IP: 192.168.1.12              │livox_ros_    │
+│ node             │ ──────────────────────────────────> │driver2       │
+│ - PointCloud2    │    Livox SDK2 UDPパケット            │              │
+│   → SDK2変換     │    port 56301 (points)             │→ /livox/lidar│
+│ - IMU→SDK2変換   │    port 56401 (IMU)                │→ /livox/imu  │
+└──────────────────┘                                    └──────────────┘
+```
+
+#### Livox Mid-360 エミュレーション（実装済み）
 
 | 項目 | 詳細 |
 |------|------|
-| プロトコル | NMEA 0183 (テキストベース) |
-| ボーレート | 9600 または 115200 bps |
-| 主要センテンス | $GPGGA (測位), $GPRMC (推奨最小), $GPVTG (速度) |
-| エミュレーション難易度 | **非常に容易** |
+| プロトコル | Livox SDK2 (UDP) |
+| ディスカバリ | UDP 56000 (broadcast) → 応答で接続確立 |
+| コマンド | UDP 56100 (WorkModeControl等) |
+| 点群データ | UDP 56300→56301 (CartesianHigh 14B / CartesianLow 8B) |
+| IMUデータ | UDP 56400→56401 |
+| 点群レート | 最大20,000点/フレーム @ 10Hz |
 
-**実現方法：**
-1. シミュレーションのROSトピック `/gps/fix` (sensor_msgs/NavSatFix) をサブスクライブ
-2. 緯度・経度・高度をNMEA形式文字列に変換
-3. マイコン (RP2040等) のUSB-CDC経由で実機PCのシリアルポートとして出力
-4. 実機PCの `nmea_navsat_driver` が通常通りパースしてROSトピックを発行
+**帯域比較（RP2040+W5500方式 vs USB-LANアダプタ方式）：**
+
+| 項目 | RP2040+W5500 (旧方式) | USB-LANアダプタ (現方式) |
+|------|---------------------|----------------------|
+| 実効帯域 | ~800 KB/s (USB CDC律速) | ~100 Mbps (Ethernet) |
+| 最大点群数 | 3,000点@10Hz (CartesianHigh) | 20,000点@10Hz (制限なし) |
+| ファームウェア | 必要 | 不要 |
+| コスト | ~2,420円 (W5500-EVB-Pico2) | ~1,000円 (USB-LANアダプタ) |
+
+USB-LANアダプタ方式が帯域・コスト・保守性すべてにおいて優れるため、こちらを推奨する。
+
+#### 他のLiDARへの展開
+
+同じUSB-LANアダプタ方式で、他のEthernet接続LiDARにも対応可能：
+
+| LiDAR | プロトコル | データポート | 必要帯域 | 状態 |
+|-------|-----------|------------|---------|------|
+| Livox Mid-360 | Livox SDK2 (UDP) | 56301 | ~12 Mbps | **実装済み** |
+| Velodyne VLP-16 | Velodyne UDP | 2368 | ~7.5 Mbps | 未実装（スタブ） |
+| Ouster OS1 | Ouster UDP | 7502 | 10〜128 Mbps | 未実装（スタブ） |
+
+#### 複数LiDAR構成
+
+複数のLiDARをエミュレーションする場合は、USB-LANアダプタを台数分用意する：
 
 ```
-シミュレーションPC                      実機PC
-/gps/fix --> NMEA変換 --> USB --> RP2040 (CDC) --> /dev/ttyACM0 --> nmea_navsat_driver --> /gps/fix
+シミュレーションPC
+    │
+    ├── USB-LANアダプタ #1 (eth1: 192.168.1.12) → Livox Mid-360 #1 エミュレーション
+    ├── USB-LANアダプタ #2 (eth2: 192.168.2.12) → Livox Mid-360 #2 エミュレーション
+    └── USB-LANアダプタ #3 (eth3: 192.168.3.12) → Velodyne VLP-16 エミュレーション
+         │          │          │
+         ▼          ▼          ▼
+      実機PC (各インターフェースにLANケーブルで接続)
 ```
 
-**既存ツール：** gpsfeed+, nmea-gps-emulator (Python), GPSSimulator（フォールトインジェクション対応）
+### 3.3 USBカメラ（UVC）— RP2040方式 **※マイコンが必要な唯一の用途**
 
-#### IMUエミュレーション（UART経由）
+**対象デバイス：** Webカメラ、RealSense（部分的）、各種USBカメラ
 
-多くのIMU（Xsens MTi, MicroStrain, Witmotion等）はUART経由でバイナリまたはASCIIプロトコルで通信する。対象IMUのプロトコルに準拠したデータをUSB-CDC経由で送信すれば、実機のIMUドライバがそのまま動作する。
+#### 方式概要
 
-### 2.4 I2C/SPIセンサ
+UVC（USB Video Class）デバイスとしてPCに認識させるためには、USBデバイスとして振る舞うマイコンが必要である。これはFT234Xやソフトウェアエミュレーションでは実現できないため、RP2040（TinyUSB）を使用する唯一のケースとなる。
+
+**アーキテクチャ：** Pico 2台構成
+
+```
+シミュレーションPC          Pico#1                  Pico#2               実機PC
+                       (CDC-SPI sender)        (UVC bridge)
+
+/image_raw                                                          
+    │                                                               
+    ▼                                                               
+uvc_bridge_node                                                     
+ - OpenCV JPEG圧縮         SPI master              SPI slave         
+ - USB CDC送信 ──USB──> Pico#1 ──UART 4Mbps──> Pico#2              
+                       (データ中継)             TinyUSB UVC          
+                                               Isochronous転送      
+                                               wMaxPacketSize=256   
+                                               ──USB──> /dev/video0
+                                                         → usb_cam
+                                                         → /image_raw
+```
+
+**実績（動作確認済み）：**
+
+| 解像度 | 圧縮方式 | フレームレート | 備考 |
+|--------|---------|--------------|------|
+| 320x240 | MJPEG | 安定動作 | テスト用途 |
+| 640x480 | MJPEG | ~17 fps | 多くのロボット用途に実用的 |
+| 1280x720 | MJPEG | 低fps | 帯域制約あり（wMaxPacketSize=256） |
+
+**設計上の重要な判断：**
+- **Isochronous転送を採用**：Bulk転送はTinyUSBの`ep_status.busy`がストリーム停止時にクリアされず、再接続不可だったため断念
+- **wMaxPacketSize=256**：Raspberry Pi 4でキーボードと共存するため、USBバス帯域予約を17%に制限
+- **解像度切替**：逆方向通信（実機PC→Pico#2→Pico#1→シミュPC）で解像度コマンドを伝搬し、動的に変更可能
+- **JPEG品質**：`ros2 param set`で動的変更可能
+
+### 3.4 I2C/SPIセンサ
 
 **対象デバイス：** MPU-6050/9250, BMI088, BMP280, ADXLシリーズ, 各種環境センサ
 
-#### エミュレーション方式
-
-マイコンをI2C/SPIスレーブとして動作させ、対象センサのレジスタマップを模擬する。
+マイコンをI2C/SPIスレーブとして動作させ、対象センサのレジスタマップを模擬する。RP2040のPIO（Programmable I/O）が特に有効。
 
 ```
 シミュレーションPC --> USB --> [RP2040] --I2C/SPI (スレーブ)--> [実機PCのI2Cマスタ / マイコン]
 ```
 
-**RP2040のPIO (Programmable I/O) が特に有効：**
-- PIOステートマシンにより、I2C/SPIスレーブプロトコルをハードウェアレベルで実装可能
-- CPUに依存しない高精度なタイミング制御
-- 複数のプロトコルを同時にエミュレート可能
-
 **課題：**
 - センサごとにレジスタマップが異なるため、対象センサの仕様書に基づいた個別実装が必要
 - WHO_AM_I レジスタ等の識別レジスタも正確に応答する必要がある（例: MPU-6050 → 0x68）
-- I2C/SPIのスレーブモードは多くのマイコンで対応が限定的
 
-### 2.5 CANバスデバイス
+### 3.5 CANバスデバイス
 
 **対象デバイス：** モータドライバ（CANopen）、車両ECU、ロボットアクチュエータ
 
-| 項目 | 詳細 |
-|------|------|
-| プロトコル | CAN 2.0A/B, CAN FD, CANopen (CiA 301/402) |
-| 物理層 | 差動2線 (CAN_H / CAN_L) |
-| 速度 | 125kbps 〜 1Mbps (CAN FD: 最大8Mbps) |
-| エミュレーション難易度 | 中程度 |
-
-**実現方法：**
-- マイコン + CANトランシーバで実現（例: ESP32内蔵TWAI + トランシーバ, Arduino + MCP2515/MCP2518FD）
-- ROSトピックの `/joint_states` や `/cmd_vel` をCANフレームに変換
-- エンコーダフィードバック、ステータスフレームを生成して応答
+マイコン + CANトランシーバで実現。ESP32-S3はCAN互換のTWAIペリフェラルを内蔵しており、外付けCANコントローラ不要。
 
 ```
-シミュレーションPC --> USB --> [ESP32 + CANトランシーバ] --CAN bus--> [実機PC + CAN I/F]
+シミュレーションPC --> USB --> [ESP32-S3 + CANトランシーバ] --CAN bus--> [実機PC + CAN I/F]
 ```
 
-### 2.6 Ethernet接続センサ（3D LiDAR等）
-
-**対象デバイス：** Velodyne VLP-16, Ouster OS1, Livox Mid-360, 各種産業用カメラ
-
-#### 3D LiDARエミュレーション
-
-3D LiDARの多くはEthernet上のUDPパケットで点群データを送信する。プロトコルが公開されているため、ソフトウェアでのエミュレーションが比較的容易。
-
-**Velodyne VLP-16の通信仕様：**
-
-| 項目 | 詳細 |
-|------|------|
-| データポート | UDP 2368 |
-| ポジションポート | UDP 8308 |
-| パケットサイズ | 1248 bytes/パケット |
-| パケット構造 | プロトコルヘッダ(42B) + データブロック×12 + タイムスタンプ(4B) + ファクトリ(2B) |
-| パケットレート | 約754パケット/秒 |
-| ポイントレート | 約300,000点/秒 |
-| リターンモード | Strongest (0x37), Last (0x38), Dual (0x39) |
-
-**Ouster OS1の通信仕様：**
-
-| 項目 | 詳細 |
-|------|------|
-| LiDARデータポート | UDP 7502 |
-| IMUデータポート | UDP 7503 |
-| LiDARパケットレート | 640 Hz |
-| IMUパケットレート | 100 Hz |
-| エンディアン | リトルエンディアン |
-
-**Livox Mid-360の通信仕様：**
-
-| 項目 | 詳細 |
-|------|------|
-| プロトコル | UDP (Livox SDK2) |
-| 同期 | IEEE 1588v2.0 PTP対応 |
-| エンディアン | リトルエンディアン |
-
-**エミュレーション方式：**
-
-```
-シミュレーションPC                                              実機PC
-                                                              
-Gazebo/Unity/Isaac Sim
-    │                                                         
-    ▼ /points (PointCloud2)                                   
-┌──────────────┐       Ethernet (UDP)        ┌──────────────┐
-│ HILS Bridge  │ ──────────────────────────> │velodyne_     │
-│ - PointCloud2│    VLP-16パケット形式         │driver        │
-│   → Velodyne │    port 2368               │              │
-│   パケット変換 │                             │→ /scan       │
-└──────────────┘                             │→ /points     │
-                                             └──────────────┘
-```
-
-**実現方法：RP2040 + W5500 によるEthernet出力**
-
-本プロジェクトでは、LiDARエミュレーションもRP2040経由で統一する。シミュレーションPCからUSB CDC経由で点群データを受信し、RP2040がW5500を通じてVelodyne/Ouster互換のUDPパケットを送信する。
-
-```
-シミュレーションPC                 RP2040 + W5500              実機PC
-                                                             
-/points (PointCloud2)             USB CDC で受信              
-    │                                 │                      
-    ▼                                 ▼                      
-HILS Bridge ──USB CDC──> RP2040: パケット構築     Ethernet
-(バイナリ点群データ送信)        → W5500 UDP送信 ────────> velodyne_driver
-                              port 2368                (UDP受信)
-```
-
-**帯域見積もり：**
-
-| LiDAR | 必要帯域 | W5500実効帯域 (SPI 33MHz) | マージン | 対応可否 |
-|-------|---------|-------------------------|---------|---------|
-| Velodyne VLP-16 | ~7.5 Mbps (754pkt/s × 1248B) | ~20 Mbps | 2.6x | ○ 十分 |
-| Ouster OS1-16/32 | ~10-25 Mbps | ~20 Mbps | 0.8-2.0x | ○〜△ チャンネル数依存 |
-| Ouster OS1-128 | ~128 Mbps | ~20 Mbps | 0.16x | × 帯域不足 |
-| Livox Mid-360 | ~12 Mbps | ~20 Mbps | 1.7x | ○ |
-
-**注意：** Ouster OS1-128等の超高チャンネルLiDARはW5500の帯域では不足する。この場合はRP2040のPIOでSPIクロックを高速化（最大62.5MHz）するか、W5500の代わりにENC28J60（10Mbps）よりも高速なW6100（最大100Mbps実効）を検討する。ただし多くのロボット用途ではVLP-16/OS1-32クラスが一般的であり、W5500で十分対応可能。
-
-**複数LiDAR構成の利点：** LAN直結方式ではLiDAR台数分のLANポートが必要だが、RP2040+W5500方式ならUSBハブに接続するRP2040を増やすだけでスケールできる。実機PC側にはRP2040のW5500から来るEthernet接続が必要だが、これもUSBイーサネットアダプタで増設可能。
-
-#### GigE Visionカメラエミュレーション
-
-産業用カメラで使われるGigE Visionプロトコルについても、ソフトウェアエミュレーションが可能：
-
-- **GigESim** (A&B Software)：PCをGigE Visionカメラとして動作させる商用SDK
-- **Basler pylon**：カメラエミュレーショントランスポートレイヤを内蔵
-- **オープンソース**: GigE-Cam-Simulator (GitHub)
-
-### 2.7 USBカメラ（UVC）
-
-**対象デバイス：** Webカメラ、RealSense（部分的）、各種USBカメラ
-
-#### マイコンによるUVCエミュレーション
-
-TinyUSBライブラリはUVC（USB Video Class）デバイスクラスをサポートしており、RP2040でのUVCカメラエミュレーションが実証されている。
-
-| 方式 | 解像度 | フレームレート | 備考 |
-|------|--------|--------------|------|
-| RP2040 + TinyUSB UVC (YUYV) | 320x240 | ~6.8 fps | 非圧縮、帯域制約大 |
-| RP2040 + TinyUSB UVC (MJPEG) | 640x480〜1280x720 | 5〜17 fps | **シミュPC側でJPEGエンコード、RP2040はパススルー** |
-| STM32H7 / Teensy 4.x (MJPEG) | 1920x1080 | ~30 fps | USB High-Speed (480Mbps) 対応 |
-
-#### RP2040 UVC + MJPEG による高解像度対応（推奨方式）
-
-USB Full-Speed (12Mbps) の帯域制約下でも、**MJPEG圧縮を活用すればfpsを落とすことで十分な解像度が確保できる**。実際の市販USBカメラでも同様のトレードオフ（高解像度では低fps）は一般的に行われている。
-
-**ポイント：RP2040自体はJPEGエンコードしない。** シミュレーションPC側のHILS Bridge NodeがOpenCV等でJPEGエンコードした圧縮フレームをUSB CDC経由でRP2040に送信し、RP2040はそれをUVC MJPEGフレームとしてそのまま出力する。
-
-```
-シミュレーションPC                    RP2040                    実機PC
-                                                              
-Gazebo/Unity/Isaac Sim              USB CDC で受信
-→ /image_raw            
-    │                                   │                     
-    ▼                                   ▼                     
-HILS Bridge Node               TinyUSB UVC デバイス           
- - OpenCV JPEG圧縮              - MJPEGフレームとして出力       
- - USB CDC送信 ──────────>      - /dev/video0 として認識 ──> usb_cam
-                                                              → /image_raw
-```
-
-**USB Full-Speed (12Mbps) での解像度・fps見積もり：**
-
-Isochronous転送の実効帯域を ~1025 KB/s として算出：
-
-| 解像度 | MJPEG圧縮率 | フレームサイズ | 達成fps | 備考 |
-|--------|-----------|-------------|--------|------|
-| 640x480 | 10:1（標準） | ~60 KB | **~17 fps** | 十分実用的 |
-| 640x480 | 20:1（高圧縮） | ~30 KB | **~34 fps** | Webカメラ相当 |
-| 1280x720 | 10:1 | ~180 KB | **~5.7 fps** | 低fpsだが動作確認には十分 |
-| 1280x720 | 20:1 | ~90 KB | **~11 fps** | ロボット用途で実用的 |
-| 1920x1080 | 20:1 | ~202 KB | **~5 fps** | 最低限の動作確認向け |
-
-**640x480 / 10〜17 fps は多くのロボットカメラ用途で実用的な値**であり、ナビゲーション用のカメラや物体検出の基本テストには十分対応できる。高fpsが必要な場合はUSB High-Speed対応マイコン（STM32H7, Teensy 4.x）に置き換えることで対応可能。
-
-**実装上の注意：**
-- RP2040は2つのUSBエンドポイントを同時に使用する：CDC（シミュPCからのデータ受信）とUVC（実機PCへの映像出力）
-- TinyUSBはComposite Device（複数USBクラスの同時使用）をサポートしている
-- RP2040の264KB SRAMは数フレーム分のMJPEGバッファとして十分
-
-### 2.8 PWM/エンコーダ（モータ制御系）
+### 3.6 PWM/エンコーダ（モータ制御系）
 
 **対象デバイス：** RCサーボ、BLDCモータ（ESC）、ステッピングモータ、ロータリエンコーダ
 
-| エミュレーション対象 | 方式 | 使用マイコン |
-|-------------------|------|------------|
-| PWM指令値の読取 | マイコンのタイマキャプチャ | Arduino / RP2040 / ESP32 |
-| エンコーダパルス生成 | マイコンPWM出力 (A/B相) | RP2040 PIO（最適）|
-| RCサーボ位置FB | PWMパルス幅読取→角度計算 | 汎用マイコン |
-| モータ電流FB | DAC出力 (アナログ) | MCP4725 + マイコン |
-
----
-
-## 3. 推奨マイコン選定
-
-### 3.1 用途別マイコン比較
-
-| マイコン/ボード | 価格帯 | USB CDC | USB UVC | Ethernet | CAN | I2C Slave | PIO | HILS適性 |
-|---------------|--------|---------|---------|----------|-----|-----------|-----|---------|
-| **Raspberry Pi Pico (RP2040)** | ~500円 | ○ | ○(低解像度) | ×(W5500追加可) | ×(MCP2515追加可) | ○(PIO) | ○ | **高** |
-| **ESP32-S3** | ~700円 | ○ | △ | ×(内蔵なし) | ○(TWAI) | ○ | × | **高** |
-| **Teensy 4.1** | ~4000円 | ○ | ○ | ○(内蔵) | ○(3ch) | ○ | × | **最高** |
-| **STM32F407/H743** | ~1500円 | ○ | ○ | ○(内蔵) | ○(2-3ch) | ○ | × | **最高** |
-
-### 3.2 標準インターフェースマイコン：RP2040 (Raspberry Pi Pico)
-
-**入手性・価格・機能のバランスから、RP2040 (Raspberry Pi Pico) を本プロジェクトの標準HILSインターフェースマイコンとする。**
-
-**選定理由：**
-- **価格**: ~500円と非常に安価。複数台購入しても数千円で収まる
-- **入手性**: 世界的に流通が安定しており、国内でも秋月電子・スイッチサイエンス等で即日入手可能
-- **USB-CDC**: TinyUSBによりシリアルデバイスとして即座に認識される
-- **PIO**: I2C/SPIスレーブ、エンコーダパルス生成など柔軟なプロトコル実装が可能
-- **UVC対応**: TinyUSBのUVCデバイスクラスにより低解像度カメラとしても機能
-- **エコシステム**: Arduino IDE / MicroPython / C SDK と豊富な開発環境
-- **互換ボード**: RP2040-Zero, Seeed XIAO RP2040等の小型互換ボードも豊富
-
-**CAN通信が必要な場合のみESP32-S3（TWAI内蔵）を併用** し、それ以外のインターフェースはRP2040で統一する方針とする。
-
-**推奨構成：**
-
-```
-┌─────────────────────────────────────────────────┐
-│              推奨HILSハードウェア構成               │
-├──────────────────┬──────────────────────────────┤
-│ シリアルセンサ     │ RP2040 × 1 (TinyUSB CDC)    │
-│ (GPS, IMU, 超音波) │ → 実機PCでは /dev/ttyACM0   │
-├──────────────────┼──────────────────────────────┤
-│ I2C/SPIセンサ     │ RP2040 × 1 (PIO スレーブ)    │
-│ (加速度計, ジャイロ)│                              │
-├──────────────────┼──────────────────────────────┤
-│ CANデバイス       │ ESP32-S3 + CANトランシーバ    │
-│ (モータドライバ)   │ or RP2040 + MCP2515         │
-├──────────────────┼──────────────────────────────┤
-│ 3D LiDAR         │ RP2040 + W5500 (UDP送信)     │
-│                  │ USBハブで複数台スケール可能    │
-├──────────────────┼──────────────────────────────┤
-│ カメラ            │ RP2040 UVC + MJPEG           │
-│                  │ (640x480@17fps 〜             │
-│                  │  1280x720@5-11fps)            │
-├──────────────────┼──────────────────────────────┤
-│ エンコーダ/PWM    │ RP2040 (PIO)                │
-└──────────────────┴──────────────────────────────┘
-```
+RP2040のPIOによりエンコーダパルス（A/B相）を高精度に生成可能。
 
 ---
 
@@ -414,25 +299,31 @@ class HilsBridgeNode(Node):
     def __init__(self):
         super().__init__('hils_bridge')
         
-        # LiDAR: PointCloud2 → Velodyne UDPパケット
-        self.create_subscription(PointCloud2, '/points', self.lidar_callback, 10)
+        # LiDAR: PointCloud2 → Livox SDK2 UDPパケット (USB-LANアダプタ経由)
+        self.create_subscription(PointCloud2, '/livox/lidar', self.lidar_callback, 10)
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # network_interfaceパラメータでバインドするインターフェースを指定可能
         
-        # GPS: NavSatFix → NMEA over Serial
+        # GPS: NavSatFix → NMEA over Serial (FT234Xクロス接続経由)
         self.create_subscription(NavSatFix, '/gps/fix', self.gps_callback, 10)
         self.serial_port = serial.Serial('/dev/ttyUSB0', 9600)
         
-        # IMU: Imu → バイナリプロトコル over Serial
-        self.create_subscription(Imu, '/imu/data', self.imu_callback, 10)
+        # Camera: Image → JPEG → USB CDC (RP2040経由)
+        self.create_subscription(Image, '/image_raw', self.camera_callback, 10)
+        self.cdc_port = serial.Serial('/dev/ttyACM0', 115200)
         
     def lidar_callback(self, msg):
-        packets = self.pointcloud2_to_velodyne_packets(msg)
+        packets = self.pointcloud2_to_livox_sdk2_packets(msg)
         for pkt in packets:
-            self.udp_socket.sendto(pkt, (TARGET_IP, 2368))
+            self.udp_socket.sendto(pkt, (LIDAR_IP, 56301))
     
     def gps_callback(self, msg):
         nmea = self.navsatfix_to_nmea(msg)
         self.serial_port.write(nmea.encode())
+    
+    def camera_callback(self, msg):
+        jpeg = self.image_to_jpeg(msg)
+        self.cdc_port.write(self.frame_protocol_encode(jpeg))
 ```
 
 ### 4.2 テスト戦略
@@ -449,8 +340,8 @@ Level 1: ドライバレベルHILS
   ※物理通信経路はソフトウェアエミュレーション（v4l2loopback, localhost UDP等）
 
 Level 2: 物理層HILS
-  シミュレーション → マイコン → 物理ケーブル → 実機PC → ドライバ → ROSトピック → アプリ
-  ※USB, UART, Ethernet, CAN等の物理経路を含む
+  シミュレーション → 物理ケーブル → 実機PC → ドライバ → ROSトピック → アプリ
+  ※USB, UART, Ethernet等の物理経路を含む
 
 Level 3: 完全HILS
   シミュレーション → 実機と同一のセンサ/アクチュエータI/F
@@ -459,36 +350,78 @@ Level 3: 完全HILS
 
 ---
 
-## 5. 実現可能性のまとめ
+## 5. 推奨ハードウェア構成
 
-### 5.1 各インターフェースの実現可能性一覧
+### 5.1 方式別ハードウェア一覧
 
-| センサ/デバイス | インターフェース | エミュレーション方式 | 実現難易度 | 推奨HW | 実機ドライバとの互換性 |
-|---------------|----------------|-------------------|----------|--------|-------------------|
-| GPS受信機 | UART (NMEA) | マイコン USB-CDC + NMEA生成 | ★☆☆☆☆ | RP2040 | 完全互換 |
-| シリアルIMU | UART (独自プロトコル) | マイコン USB-CDC + プロトコル生成 | ★★☆☆☆ | RP2040 | 完全互換（プロトコル実装次第） |
-| I2C IMU (MPU6050等) | I2C スレーブ | マイコン PIO I2Cスレーブ | ★★★☆☆ | RP2040 (PIO) | 完全互換（レジスタマップ実装次第） |
-| 3D LiDAR (Velodyne) | Ethernet UDP | RP2040 + W5500 UDP送信 | ★★☆☆☆ | RP2040 + W5500 | 完全互換 |
-| 3D LiDAR (Ouster 16/32ch) | Ethernet UDP | RP2040 + W5500 UDP送信 | ★★☆☆☆ | RP2040 + W5500 | 完全互換 |
-| 3D LiDAR (Ouster 128ch) | Ethernet UDP | 高速SPI or W6100必要 | ★★★★☆ | RP2040 + W6100 | 帯域要検証 |
-| 3D LiDAR (Livox) | Ethernet UDP | RP2040 + W5500 UDP送信 | ★★★☆☆ | RP2040 + W5500 | SDK依存、要検証 |
-| USBカメラ (MJPEG) | USB UVC | RP2040 UVC + MJPEG パススルー | ★★☆☆☆ | RP2040 | 完全互換 (640x480@17fps, 720p@5-11fps) |
-| USBカメラ (高fps要) | USB UVC | STM32H7 / Teensy 4.x UVC | ★★★☆☆ | STM32H7 / Teensy | 完全互換 (1080p@30fps) |
-| GigE Visionカメラ | Ethernet GigE Vision | GigESim / SW | ★★★☆☆ | PC + SDK | 互換 |
-| CANモータドライバ | CAN bus | マイコン + CANトランシーバ | ★★★☆☆ | ESP32 / RP2040+MCP2515 | プロトコル実装次第 |
-| RCサーボ | PWM | マイコン PWM出力/入力 | ★☆☆☆☆ | 汎用マイコン | N/A（アナログ信号） |
-| エンコーダ | パルス (A/B相) | マイコン PIO | ★★☆☆☆ | RP2040 (PIO) | 完全互換 |
-| 力覚センサ | アナログ / SPI | DAC出力 / SPIスレーブ | ★★★☆☆ | RP2040 + DAC | 方式依存 |
+```
+┌─────────────────────────────────────────────────────────────┐
+│              推奨HILSハードウェア構成（改訂版）                 │
+├──────────────────┬──────────────────────────────────────────┤
+│ シリアルセンサ     │ FT234X × 2 (TX/RXクロス接続)              │
+│ (GPS, IMU, 超音波) │ → 実機PCでは /dev/ttyUSB0               │
+│                  │ → マイコン不要                            │
+├──────────────────┼──────────────────────────────────────────┤
+│ 3D LiDAR         │ USB-LANアダプタ + 純ソフトウェアエミュレータ │
+│ (Livox, Velodyne) │ → USB-LANにLiDAR IPを割当               │
+│                  │ → マイコン不要                            │
+├──────────────────┼──────────────────────────────────────────┤
+│ カメラ            │ RP2040 × 2 (Pico#1 + Pico#2)            │
+│                  │ → TinyUSB UVC + MJPEG                    │
+│                  │ → マイコンが必要な唯一の用途               │
+├──────────────────┼──────────────────────────────────────────┤
+│ I2C/SPIセンサ     │ RP2040 × 1 (PIO スレーブ)               │
+│ (加速度計, ジャイロ)│ → 必要な場合のみ                         │
+├──────────────────┼──────────────────────────────────────────┤
+│ CANデバイス       │ ESP32-S3 + CANトランシーバ               │
+│ (モータドライバ)   │ → 必要な場合のみ                         │
+├──────────────────┼──────────────────────────────────────────┤
+│ エンコーダ/PWM    │ RP2040 (PIO)                            │
+│                  │ → 必要な場合のみ                         │
+└──────────────────┴──────────────────────────────────────────┘
+```
 
-### 5.2 結論
+### 5.2 最小構成
 
-1. **安価なマイコンを活用したHILSは十分に実現可能**であり、特にシリアルセンサ（GPS, IMU）とEthernet接続センサ（3D LiDAR）については既存のROSドライバとの完全互換を維持したHILSが構築できる
+多くのロボットで使われるLiDAR + カメラの構成を最小構成とする：
 
-2. **RP2040 (Raspberry Pi Pico) を標準HILSインターフェースマイコンとして採用**：USB-CDC対応、PIOによる柔軟なプロトコルエミュレーション、TinyUSB UVCサポート、入手性・価格ともに優秀。CAN通信が必要な場合のみESP32-S3を併用
+| 用途 | ハードウェア | 概算コスト |
+|------|------------|----------|
+| LiDAR (Livox等) | USB-LANアダプタ × 1 | ~1,000円 |
+| カメラ (UVC) | Raspberry Pi Pico H × 2 + USBケーブル | ~2,200円 |
+| 配線・ジャンパ | ブレッドボード、ジャンパワイヤ | ~500円 |
+| **合計** | | **~3,700円** |
 
-3. **USBカメラのHILSはRP2040 UVC + MJPEGパススルー方式を推奨**：シミュレーションPC側でJPEGエンコードし、RP2040はUVC MJPEGフレームとしてパススルー出力する。USB Full-Speed (12Mbps) でも640x480@17fps、1280x720@5-11fpsが達成可能で、多くのロボット用途に実用的。市販USBカメラでも高解像度時にfpsを落とす設計は一般的であり、違和感のない方式
+シリアルセンサを追加する場合は FT234Xのペア（~800円/組）を追加するだけ。
 
-4. **3D LiDARのHILSはRP2040 + W5500でEthernet出力**：パケットフォーマットが公開されているため完全互換のエミュレーションが可能。USBハブ経由でRP2040を追加するだけで複数LiDAR構成にもスケール可能であり、PC側のLANポート不足問題を回避できる
+---
+
+## 6. 実現可能性のまとめ
+
+### 6.1 各インターフェースの実現可能性一覧
+
+| センサ/デバイス | インターフェース | エミュレーション方式 | 実現難易度 | 推奨HW | 状態 |
+|---------------|----------------|-------------------|----------|--------|------|
+| GPS受信機 | UART (NMEA) | FT234Xクロス接続 + NMEA生成 | ★☆☆☆☆ | FT234X | 未実装 |
+| シリアルIMU | UART (独自プロトコル) | FT234Xクロス接続 + プロトコル生成 | ★★☆☆☆ | FT234X | 未実装 |
+| 3D LiDAR (Livox Mid-360) | Ethernet UDP | USB-LANアダプタ + 純ソフトウェア | ★★☆☆☆ | USB-LANアダプタ | **実装済み** |
+| 3D LiDAR (Velodyne VLP-16) | Ethernet UDP | USB-LANアダプタ + 純ソフトウェア | ★★☆☆☆ | USB-LANアダプタ | スタブ |
+| 3D LiDAR (Ouster OS1) | Ethernet UDP | USB-LANアダプタ + 純ソフトウェア | ★★☆☆☆ | USB-LANアダプタ | スタブ |
+| USBカメラ (MJPEG) | USB UVC | RP2040 × 2 + TinyUSB UVC | ★★★☆☆ | RP2040 (Pico H) | **実装済み** |
+| I2C IMU (MPU6050等) | I2C スレーブ | RP2040 PIO I2Cスレーブ | ★★★☆☆ | RP2040 (PIO) | 未実装 |
+| CANモータドライバ | CAN bus | ESP32-S3 TWAI + CANトランシーバ | ★★★☆☆ | ESP32-S3 | 未実装 |
+| RCサーボ | PWM | マイコン PWM出力/入力 | ★☆☆☆☆ | 汎用マイコン | 未実装 |
+| エンコーダ | パルス (A/B相) | RP2040 PIO | ★★☆☆☆ | RP2040 (PIO) | 未実装 |
+
+### 6.2 結論
+
+1. **インターフェース種別ごとに最適な方式を選択することで、マイコンの使用を最小限に抑えつつ、安価なHILSが実現可能。** マイコン（RP2040）が必要なのはUVCカメラエミュレーションのみであり、シリアルセンサはFT234Xクロス接続、LiDARはUSB-LANアダプタ＋純ソフトウェアで対応できる
+
+2. **Livox Mid-360のHILSは実装・動作確認済み。** USB-LANアダプタに`network_interface`パラメータでバインドし、Livox SDK2プロトコルを完全にPythonで実装。全点群20,000点@10Hz送信可能
+
+3. **UVCカメラのHILSも実装・動作確認済み。** RP2040 2台構成でMJPEGパススルー。640x480@17fps、Raspberry Pi 4でキーボード共存可能
+
+4. **最小構成（LiDAR + カメラ）は約3,700円で構築可能。** 従来の見積もり（~17,500円）から大幅にコストダウン
 
 5. **ros2_controlの`hardware_interface`抽象化を活用**することで、HILSと実機の切替をソフトウェア設定のみで実現できる設計が望ましい
 
@@ -500,9 +433,5 @@ Level 3: 完全HILS
 - [PX4 HITL Simulation](https://docs.px4.io/main/en/simulation/hitl.html)
 - [ros2_control Mock Components](https://control.ros.org/rolling/doc/ros2_control/hardware_interface/doc/mock_components_userdoc.html)
 - [TinyUSB - Open Source USB Stack](https://github.com/hathach/tinyusb)
-- [Velodyne VLP-16 Packet Structure](https://velodynelidar.com/wp-content/uploads/2019/09/63-9276-Rev-C-VLP-16-Application-Note-Packet-Structure-Timing-Definition.pdf)
-- [Ouster Sensor Data Format](https://static.ouster.dev/sensor-docs/image_route1/image_route2/sensor_data/sensor-data.html)
 - [Livox SDK Communication Protocol](https://github.com/Livox-SDK/Livox-SDK/wiki/Livox-SDK-Communication-Protocol)
 - [v4l2loopback](https://github.com/umlaeute/v4l2loopback)
-- [GigESim - GigE Vision Camera Emulator](https://www.ab-soft.com/gigesim.php)
-- [Robotics Knowledgebase: HIL/SIL Testing](https://roboticsknowledgebase.com/wiki/system-design-development/In-Loop-Testing/)
