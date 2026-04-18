@@ -187,16 +187,20 @@ class LivoxEmulatorNode(Node):
 
         self.add_on_set_parameters_callback(self._on_param_change)
 
-        self._lidar_ip = self.get_parameter('lidar_ip').value
         self._host_ip = self.get_parameter('host_ip').value
         self._serial_number = self.get_parameter('serial_number').value
         self._network_interface = self.get_parameter('network_interface').value
 
-        # Auto-detect or validate network interface
+        # Determine lidar_ip and validate network
         if self._network_interface:
-            self._setup_interface_ip(self._network_interface, self._lidar_ip)
+            self._lidar_ip, netmask = self._get_interface_info(self._network_interface)
         else:
+            self._lidar_ip = self.get_parameter('lidar_ip').value
             self._verify_ip_available(self._lidar_ip)
+            netmask = self._find_netmask_for_ip(self._lidar_ip)
+
+        if netmask:
+            self._validate_subnet(self._lidar_ip, self._host_ip, netmask)
 
         # State
         self._streaming = False
@@ -252,21 +256,98 @@ class LivoxEmulatorNode(Node):
             f'max_pts={self.get_parameter("max_points_per_frame").value}, '
             f'downsample={self.get_parameter("downsample_mode").value}')
 
-    def _setup_interface_ip(self, iface: str, ip: str):
-        """Check if the interface has the expected IP, log guidance if not."""
-        import subprocess
-        result = subprocess.run(
-            ['ip', 'addr', 'show', 'dev', iface],
-            capture_output=True, text=True)
-        if result.returncode != 0:
+    def _get_interface_info(self, iface: str):
+        """Get IPv4 address and netmask of a network interface using ioctl.
+
+        Returns (ip, netmask) tuple.
+        """
+        import fcntl
+        SIOCGIFADDR = 0x8915
+        SIOCGIFNETMASK = 0x891B
+
+        ctrl_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        # Get IP
+        req = bytearray(40)
+        req[:len(iface)] = iface.encode()
+        try:
+            fcntl.ioctl(ctrl_sock.fileno(), SIOCGIFADDR, req)
+        except OSError:
+            ctrl_sock.close()
             self.get_logger().error(
-                f'Interface {iface} not found. Available interfaces:\n'
-                f'  ip link show')
-            raise RuntimeError(f'Network interface {iface} not found')
-        if ip not in result.stdout:
-            self.get_logger().warn(
-                f'{ip} not assigned to {iface}. Run:\n'
-                f'  sudo ip addr add {ip}/24 dev {iface}')
+                f'Cannot get IP of {iface}. Check the interface exists and has an IP.')
+            raise RuntimeError(f'No IP address on {iface}')
+        ip = socket.inet_ntoa(req[20:24])
+
+        # Get netmask
+        req = bytearray(40)
+        req[:len(iface)] = iface.encode()
+        try:
+            fcntl.ioctl(ctrl_sock.fileno(), SIOCGIFNETMASK, req)
+            netmask = socket.inet_ntoa(req[20:24])
+        except OSError:
+            netmask = None
+
+        ctrl_sock.close()
+        self.get_logger().info(f'Using {iface}: ip={ip}, netmask={netmask}')
+        return ip, netmask
+
+    def _find_netmask_for_ip(self, target_ip: str):
+        """Find the netmask for a given IP by scanning interfaces."""
+        import fcntl
+        import os
+        SIOCGIFADDR = 0x8915
+        SIOCGIFNETMASK = 0x891B
+
+        try:
+            ifaces = os.listdir('/sys/class/net/')
+        except OSError:
+            return None
+
+        ctrl_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        for iface in ifaces:
+            req = bytearray(40)
+            req[:len(iface)] = iface.encode()
+            try:
+                fcntl.ioctl(ctrl_sock.fileno(), SIOCGIFADDR, req)
+                ip = socket.inet_ntoa(req[20:24])
+                if ip == target_ip:
+                    req2 = bytearray(40)
+                    req2[:len(iface)] = iface.encode()
+                    fcntl.ioctl(ctrl_sock.fileno(), SIOCGIFNETMASK, req2)
+                    netmask = socket.inet_ntoa(req2[20:24])
+                    ctrl_sock.close()
+                    self.get_logger().info(
+                        f'Found {target_ip} on {iface}, netmask={netmask}')
+                    return netmask
+            except OSError:
+                continue
+        ctrl_sock.close()
+        return None
+
+    def _validate_subnet(self, lidar_ip: str, host_ip: str, netmask: str):
+        """Check that host_ip is on the same subnet as lidar_ip."""
+        def ip_to_int(ip):
+            return struct.unpack('!I', socket.inet_aton(ip))[0]
+
+        mask = ip_to_int(netmask)
+        lidar_net = ip_to_int(lidar_ip) & mask
+        host_net = ip_to_int(host_ip) & mask
+
+        if lidar_net != host_net:
+            cidr = bin(mask).count('1')
+            lidar_subnet = socket.inet_ntoa(struct.pack('!I', lidar_net))
+            host_subnet = socket.inet_ntoa(struct.pack('!I', host_net))
+            self.get_logger().error(
+                f'host_ip {host_ip} is NOT on the same subnet as lidar_ip {lidar_ip}/{cidr}\n'
+                f'  lidar subnet: {lidar_subnet}/{cidr}\n'
+                f'  host subnet:  {host_subnet}/{cidr}\n'
+                f'  Robot PC must be on the same subnet to receive Livox packets.')
+            raise RuntimeError(
+                f'{host_ip} is not reachable from {lidar_ip}/{cidr}')
+
+        self.get_logger().info(
+            f'Subnet OK: {lidar_ip} and {host_ip} are on the same /{bin(mask).count("1")} network')
 
     def _verify_ip_available(self, ip: str):
         """Check if lidar_ip is assigned to any interface."""
@@ -276,9 +357,9 @@ class LivoxEmulatorNode(Node):
             test_sock.close()
         except OSError:
             self.get_logger().error(
-                f'{ip} is not assigned to any interface. Run:\n'
-                f'  sudo ip addr add {ip}/24 dev <interface>\n'
-                f'  Or set network_interface parameter to auto-detect.')
+                f'{ip} is not assigned to any interface. Set network_interface '
+                f'parameter for auto-configuration, or manually run:\n'
+                f'  sudo ip addr add {ip}/24 dev <interface>')
             raise RuntimeError(f'Cannot bind to {ip}')
 
     def _create_udp_socket(self, port: int, reuse: bool = False,
