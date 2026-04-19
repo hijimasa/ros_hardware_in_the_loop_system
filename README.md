@@ -43,7 +43,7 @@ The ROS 2 packages live in `ros2_hils_bridge/` and can be cloned directly into `
 | Device | Method | ROS Package | Firmware | Status |
 |--------|--------|-------------|----------|--------|
 | Livox Mid-360 | USB-LAN + SW | hils_bridge_lidar_livox | N/A | Implemented, **verified** |
-| Velodyne VLP-16 | USB-LAN + SW | hils_bridge_lidar_velodyne | N/A | Implemented, unverified |
+| Velodyne VLP-16 | USB-LAN + SW | hils_bridge_lidar_velodyne | N/A | Implemented, **verified** |
 | Ouster OS1 | USB-LAN + SW | hils_bridge_lidar_ouster | N/A | Implemented, unverified |
 | GPS (NMEA) | FT234X x 2 | hils_bridge_serial_gps | N/A | Implemented, unverified |
 | IMU (Witmotion) | FT234X x 2 | hils_bridge_serial_imu | N/A | Implemented, unverified |

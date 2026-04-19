@@ -43,7 +43,7 @@ ROS 2 パッケージ群は `ros2_hils_bridge/` に分離されており、`colc
 | デバイス | 方式 | ROS パッケージ | ファームウェア | 状態 |
 |---------|------|--------------|-------------|------|
 | Livox Mid-360 | USB-LAN + SW | hils_bridge_lidar_livox | 不要 | 実装済・**動作確認済** |
-| Velodyne VLP-16 | USB-LAN + SW | hils_bridge_lidar_velodyne | 不要 | 実装済・未検証 |
+| Velodyne VLP-16 | USB-LAN + SW | hils_bridge_lidar_velodyne | 不要 | 実装済・**動作確認済** |
 | Ouster OS1 | USB-LAN + SW | hils_bridge_lidar_ouster | 不要 | 実装済・未検証 |
 | GPS (NMEA) | FT234X x 2 | hils_bridge_serial_gps | 不要 | 実装済・未検証 |
 | IMU (Witmotion) | FT234X x 2 | hils_bridge_serial_imu | 不要 | 実装済・未検証 |

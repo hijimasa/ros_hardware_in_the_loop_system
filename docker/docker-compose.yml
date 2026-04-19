@@ -1,0 +1,63 @@
+# 1-PC HILS verification: two containers with isolated network namespaces
+#
+# Usage:
+#   # Allow containers to connect to the host X server (run once per session)
+#   xhost +local:docker
+#
+#   docker compose -f docker/docker-compose.yml up -d
+#   docker compose -f docker/docker-compose.yml exec sim bash
+#   docker compose -f docker/docker-compose.yml exec robot bash
+#   docker compose -f docker/docker-compose.yml down
+#
+# Topology:
+#   hils_net (192.168.100.0/24, bridge network)
+#     ├── sim container   (192.168.100.201)  -- runs emulator
+#     └── robot container (192.168.100.100)  -- runs real driver
+#
+# Both containers share the same image and mount ros2_hils_bridge, but live
+# in separate network namespaces so they can both bind port 2368/7502/etc.
+# without conflict. X11 forwarding is enabled for rviz2 and other GUI apps.
+
+services:
+  sim:
+    image: ${USER:-ubuntu}/ros-jazzy-hils
+    container_name: hils_sim
+    hostname: hils-sim
+    networks:
+      hils_net:
+        ipv4_address: 192.168.100.201
+    volumes:
+      - ../ros2_hils_bridge:/home/ubuntu/colcon_ws/src/ros2_hils_bridge
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOME}/.Xauthority:/home/ubuntu/.Xauthority:ro
+    environment:
+      - ROS_DOMAIN_ID=42
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=/home/ubuntu/.Xauthority
+      - QT_X11_NO_MITSHM=1
+    entrypoint: ["tail", "-f", "/dev/null"]    # keep container running
+
+  robot:
+    image: ${USER:-ubuntu}/ros-jazzy-hils
+    container_name: hils_robot
+    hostname: hils-robot
+    networks:
+      hils_net:
+        ipv4_address: 192.168.100.100
+    volumes:
+      - ../ros2_hils_bridge:/home/ubuntu/colcon_ws/src/ros2_hils_bridge
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOME}/.Xauthority:/home/ubuntu/.Xauthority:ro
+    environment:
+      - ROS_DOMAIN_ID=43         # separate domain so ROS topics don't leak
+      - DISPLAY=${DISPLAY}
+      - XAUTHORITY=/home/ubuntu/.Xauthority
+      - QT_X11_NO_MITSHM=1
+    entrypoint: ["tail", "-f", "/dev/null"]    # keep container running
+
+networks:
+  hils_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24

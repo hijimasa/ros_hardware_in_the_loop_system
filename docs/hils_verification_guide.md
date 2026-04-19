@@ -14,28 +14,51 @@ LiDARエミュレータはマイコン不要。USB-LANアダプタまたは1台P
 
 ### 1.2 Velodyne VLP-16
 
-#### 1台PC内ループバック検証
+#### 1台PC内検証（Docker Compose で 2 コンテナ）
+
+`dummy0` 方式ではエミュレータとドライバが同じカーネルのポート2368を取り合って衝突する。Dockerコンテナを2つ立ち上げれば、各コンテナが独立したネットワーク名前空間を持つためポート衝突なく検証できる。
 
 ```bash
-# ターミナル1: ダミーネットワークインターフェースを作成
-sudo ip link add dummy0 type dummy
-sudo ip addr add 192.168.1.201/24 dev dummy0
-sudo ip link set dummy0 up
+# Docker Composeで sim/robot 両コンテナを起動
+cd docker
+docker compose up -d
 
-# ターミナル2: エミュレータ起動
-source install/setup.bash
+# コンテナ 'sim' 側でエミュレータを起動
+docker compose exec sim bash
+# コンテナ内:
+source /opt/ros/jazzy/setup.bash
+cd ~/colcon_ws && colcon build && source install/setup.bash
 ros2 launch hils_bridge_lidar_velodyne velodyne_emulator.launch.py \
-  device_ip:=192.168.1.201 \
-  host_ip:=192.168.1.201 \
-  network_interface:=dummy0
+  device_ip:=192.168.100.201 \
+  host_ip:=192.168.100.100 \
+  network_interface:=eth0
+  # 点群のトピックを指定したい場合は pointcloud_topic:=/livox/lidar
+# 別ターミナルでテスト用PointCloud2をパブリッシュ
+# ros2 bag play などでもOK
 
-# ターミナル3: UDPパケットの受信確認（velodyne_driverなしで直接確認）
-sudo tcpdump -i dummy0 udp port 2368 -c 10
+# 別ターミナルでコンテナ 'robot' 側でドライバを起動
+docker compose exec robot bash
+# コンテナ内:
+source /opt/ros/jazzy/setup.bash
+source ~/colcon_ws/install/setup.bash
+# launchファイルではYAMLファイルの変更が必要なのでrunからの立ち上げが手軽
+ros2 run velodyne_driver velodyne_driver_node --ros-args \
+  -p device_ip:=192.168.100.201 \
+  -p frame_id:=velodyne \
+  -p model:=VLP16 \
+  -p port:=2368 \
+  -p rpm:=600.0 \
+  -p gps_time:=false \
+  -p read_fast:=false \
+  -p read_once:=false \
+  -p repeat_delay:=0.0 \
+  -p timestamp_first_packet:=false
 
-# ターミナル4: テスト用PointCloud2をパブリッシュ
-ros2 topic pub /velodyne_points sensor_msgs/PointCloud2 \
-  "{'header': {'frame_id': 'velodyne'}, 'height': 1, 'width': 0, 'fields': [], 'data': []}" \
-  --rate 10
+# トピック確認
+ros2 topic echo /velodyne_points --no-arr | head -20
+
+# 終了時
+docker compose down
 ```
 
 #### 2台PC間検証（velodyne_driverを使用）

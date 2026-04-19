@@ -53,13 +53,18 @@ RUN git clone https://github.com/Livox-SDK/Livox-SDK2.git && \
     cd / && rm -rf Livox-SDK2
 
 # ── Velodyne driver (built from source for jazzy) ──
+# Use --merge-install so install/ has a flat structure (lib/, share/, include/)
+# that merges cleanly into /opt/ros/jazzy without creating nested setup.bash
+# files that would break AMENT_PREFIX_PATH.
 RUN mkdir -p /tmp/velodyne_ws/src && \
     cd /tmp/velodyne_ws/src && \
     git clone https://github.com/ros-drivers/velodyne.git -b ros2 && \
     cd /tmp/velodyne_ws && \
     . /opt/ros/jazzy/setup.sh && \
-    colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release && \
-    cp -r install/* /opt/ros/jazzy/ && \
+    colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release && \
+    cp -r install/include /opt/ros/jazzy/ 2>/dev/null || true && \
+    cp -r install/lib /opt/ros/jazzy/ && \
+    cp -r install/share /opt/ros/jazzy/ && \
     rm -rf /tmp/velodyne_ws
 
 RUN ldconfig
