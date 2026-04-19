@@ -18,7 +18,8 @@ RUN apt-get update -y -qq && \
       git wget curl unzip \
       python3-pip \
       libopencv-dev libeigen3-dev \
-      libpcap-dev libyaml-cpp-dev && \
+      libpcap-dev libyaml-cpp-dev \
+      libqt5serialport5-dev qtbase5-dev && \
     apt-get autoremove -y -qq && \
     rm -rf /var/lib/apt/lists/*
 
@@ -98,7 +99,8 @@ WORKDIR /home/${USER}/colcon_ws
 
 # ── Pre-clone sensor drivers into workspace ──
 RUN mkdir -p src && \
-    git clone https://github.com/Livox-SDK/livox_ros_driver2.git src/livox_ros_driver2
+    git clone https://github.com/Livox-SDK/livox_ros_driver2.git src/livox_ros_driver2 && \
+    git clone -b ros2 --recursive https://github.com/ElettraSciComp/witmotion_IMU_ros.git src/witmotion_ros
 
 RUN echo 'source /opt/ros/jazzy/setup.bash' >> ~/.bashrc && \
     echo '[ -f ~/colcon_ws/install/setup.bash ] && source ~/colcon_ws/install/setup.bash' >> ~/.bashrc

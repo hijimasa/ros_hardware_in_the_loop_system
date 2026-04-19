@@ -171,14 +171,21 @@ FT234X #1 (シミュPC側)      FT234X #2 (実機PC側)
 # FT234X #1 のデバイスパスを確認
 ls /dev/ttyUSB*
 
-# GPSブリッジ起動
+# GPSブリッジ起動（fix と vel の両方を subscribe する）
 ros2 launch hils_bridge_serial_gps gps_bridge.launch.py \
   serial_port:=/dev/ttyUSB0 \
   fix_topic:=/gps/fix
+  # vel_topic:=/gps/vel  # デフォルト。enable_velocity:=false で無効化可
 
 # テスト用NavSatFixパブリッシュ
-ros2 topic pub /gps/fix sensor_msgs/NavSatFix \
+ros2 topic pub /gps/fix sensor_msgs/msg/NavSatFix \
   "{'header': {'stamp': {'sec': 1713400000}}, 'status': {'status': 0}, 'latitude': 35.6812, 'longitude': 139.7671, 'altitude': 40.0}" \
+  --rate 1
+
+# 別ターミナルで TwistStamped をパブリッシュ（GPRMC の speed/course を検証）
+# 北東方向に約 10 m/s ≒ 19.4 knot で移動するシナリオ
+ros2 topic pub /gps/vel geometry_msgs/msg/TwistStamped \
+  "{'header': {'frame_id': 'gps'}, 'twist': {'linear': {'x': 7.07, 'y': 7.07, 'z': 0.0}}}" \
   --rate 1
 
 # --- 実機PC ---
@@ -188,13 +195,21 @@ ls /dev/ttyUSB*
 # NMEAデータの生着確認（ドライバなしで直接確認）
 cat /dev/ttyUSB0
 # → $GPGGA,... と $GPRMC,... が表示されるはず
+# → GPRMC の speed フィールドが空でなく、course も入っていること
 
-# nmea_navsat_driverで確認
-ros2 launch nmea_navsat_driver nmea_serial_driver_node.launch.py \
-  port:=/dev/ttyUSB0 \
-  baud:=9600
+# nmea_navsat_driver で確認
+# NOTE: 上流の nmea_serial_driver.launch.py は port/baud 引数を無視するため
+#       ros2 run で --ros-args 指定する方法を使う
+ros2 run nmea_navsat_driver nmea_serial_driver --ros-args \
+  -p port:=/dev/ttyUSB0 \
+  -p baud:=9600
 
-ros2 topic echo /fix
+# /fix と /vel の両方を確認
+ros2 topic echo --once /fix
+# → latitude/longitude がエミュレータ側 /gps/fix と一致
+ros2 topic echo --once /vel
+# → twist.linear.x/y が NaN ではなく、北東方向の速度成分が入っていること
+#   （/gps/vel を pub していない場合は NaN になる = 想定通り）
 ```
 
 ### 2.2 シリアルIMU (Witmotion WT901)
@@ -212,10 +227,26 @@ ros2 topic pub /imu/data sensor_msgs/Imu \
 
 # --- 実機PC ---
 # バイナリデータの生着確認
-xxd /dev/ttyUSB0 | head -20
+# NOTE: cat/od/xxd は tty を canonical mode で開くため、
+#       事前に raw + 正しい baud に切り替える必要がある
+stty -F /dev/ttyUSB1 115200 raw -echo -echoe -echok
+od -An -tx1 -N66 /dev/ttyUSB1
 # → 55 51 ... 55 52 ... 55 53 ... のパターンが見えるはず
 
-# witmotion_ros2ドライバで確認（ドライバがインストールされている場合）
+# witmotion_ros (ElettraSciComp版) で確認
+# NOTE: 上流の wt901.yml デフォルト port は ttyUSB0 なので変更が必要。
+#       use_native_orientation: true (デフォルト) のままで OK
+#       (エミュレータは 0x59 Quaternion パケットも送るため)。
+#       姿勢推定なしのシナリオで Euler→Quat 変換に切り替えたい場合のみ
+#       use_native_orientation: false に変更する。
+sudo sed -i 's|port: .*|port: /dev/ttyUSB1|' \
+  $(ros2 pkg prefix witmotion_ros)/share/witmotion_ros/config/wt901.yml
+
+ros2 launch witmotion_ros wt901.launch.py
+
+ros2 topic hz /imu
+# 期待: 約25Hz（emulator 50Hz × 3pkt を 50ms polling で消費するため）
+ros2 topic echo --once /imu
 ```
 
 ---
