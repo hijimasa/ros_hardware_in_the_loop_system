@@ -44,7 +44,9 @@ ROS 2 パッケージ群は `ros2_hils_bridge/` に分離されており、`colc
 |---------|------|--------------|-------------|------|
 | Livox Mid-360 | USB-LAN + SW | hils_bridge_lidar_livox | 不要 | 実装済・**動作確認済** |
 | Velodyne VLP-16 | USB-LAN + SW | hils_bridge_lidar_velodyne | 不要 | 実装済・**動作確認済** |
-| Ouster OS1 | USB-LAN + SW | hils_bridge_lidar_ouster | 不要 | 実装済・未検証 |
+| Ouster OS1 | USB-LAN + SW | hils_bridge_lidar_ouster | 不要 | 実装済・**動作確認済**[^ouster-note] |
+
+[^ouster-note]: Ouster はエミュレータ側で HTTP REST API (port 80) を提供するため Docker では `sysctls: net.ipv4.ip_unprivileged_port_start=80` が必要。詳細は [docs/hils_verification_guide.md](docs/hils_verification_guide.md#13-ouster-os1) を参照。
 | GPS (NMEA) | FT234X x 2 | hils_bridge_serial_gps | 不要 | 実装済・未検証 |
 | IMU (Witmotion) | FT234X x 2 | hils_bridge_serial_imu | 不要 | 実装済・未検証 |
 

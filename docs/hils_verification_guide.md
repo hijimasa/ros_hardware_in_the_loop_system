@@ -85,17 +85,65 @@ ros2 topic echo /velodyne_points --no-arr | head -20
 
 ### 1.3 Ouster OS1
 
-Velodyneと同様の手順。ポートは7502（LiDAR）/ 7503（IMU）。
+Velodyneと同様の手順だが、**Ouster 固有の注意点が多い**ので以下を守ること。
+
+#### ⚠️ Ouster 固有の必須事項
+
+| 項目 | 内容 | 理由 |
+|------|------|------|
+| **sim コンテナの sysctl** | `net.ipv4.ip_unprivileged_port_start=80` を設定 | エミュレータは HTTP REST API を port 80 で提供。非root ユーザーが bind するため必要 |
+| **firmware_ver ≥ 2.4** | エミュレータは `v2.5.2` を返す | modern な ouster_ros は 2.4 以上しか受け付けない |
+
+> **NOTE:** 以前は `lidar_port:=7502 imu_port:=7503` の明示指定が必要だったが、`set_config_param` クエリの URL decode の副作用を修正したことで `lidar_port:=0`（デフォルト=random port）でも動的追従が効くようになった。両方の方式で動作確認済み。
+
+#### 1台PC内検証（Docker Compose で 2 コンテナ）
 
 ```bash
-# シミュレーションPC
+cd docker
+docker compose up -d
+
+# sim コンテナ: エミュレータを起動
+docker compose exec sim bash
+source /opt/ros/jazzy/setup.bash
+cd ~/colcon_ws && colcon build && source install/setup.bash
+ros2 launch hils_bridge_lidar_ouster ouster_emulator.launch.py \
+  device_ip:=192.168.100.201 \
+  host_ip:=192.168.100.100 \
+  network_interface:=eth0 \
+  pointcloud_topic:=/livox/lidar   # 入力トピック名は環境に合わせる
+
+# 別ターミナルで robot コンテナ: ドライバを起動
+docker compose exec robot bash
+source /opt/ros/jazzy/setup.bash
+ros2 launch ouster_ros sensor.launch.xml \
+  sensor_hostname:=192.168.100.201 \
+  viz:=false
+# デフォルト (lidar_port:=0 imu_port:=0 = random) で動作する。
+# 明示指定したい場合は lidar_port:=7502 imu_port:=7503 を追加。
+
+# 別ターミナルで確認
+docker compose exec robot bash
+source /opt/ros/jazzy/setup.bash
+ros2 topic hz /ouster/points
+# 期待: 約10Hz
+ros2 topic echo --once /ouster/points | head -20
+# 期待: height=16, width=512 (OS1-16 × 512x10mode)
+```
+
+#### 2台PC間検証
+
+```bash
+# --- シミュレーションPC ---
 sudo ip addr add 192.168.1.100/24 dev eth1
 ros2 launch hils_bridge_lidar_ouster ouster_emulator.launch.py \
   network_interface:=eth1 \
-  host_ip:=192.168.1.5
+  host_ip:=192.168.1.5 \
+  pointcloud_topic:=/points
 
-# 実機PC
-# ouster_ros ドライバを起動
+# --- 実機PC (192.168.1.5) ---
+ros2 launch ouster_ros sensor.launch.xml \
+  sensor_hostname:=192.168.1.100 \
+  viz:=false
 ```
 
 ---

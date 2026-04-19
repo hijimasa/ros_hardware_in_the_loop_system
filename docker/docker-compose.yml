@@ -35,6 +35,9 @@ services:
       - DISPLAY=${DISPLAY}
       - XAUTHORITY=/home/ubuntu/.Xauthority
       - QT_X11_NO_MITSHM=1
+    sysctls:
+      # Allow unprivileged binding to ports >= 80 (for Ouster HTTP API on port 80)
+      - net.ipv4.ip_unprivileged_port_start=80
     entrypoint: ["tail", "-f", "/dev/null"]    # keep container running
 
   robot:

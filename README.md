@@ -44,7 +44,9 @@ The ROS 2 packages live in `ros2_hils_bridge/` and can be cloned directly into `
 |--------|--------|-------------|----------|--------|
 | Livox Mid-360 | USB-LAN + SW | hils_bridge_lidar_livox | N/A | Implemented, **verified** |
 | Velodyne VLP-16 | USB-LAN + SW | hils_bridge_lidar_velodyne | N/A | Implemented, **verified** |
-| Ouster OS1 | USB-LAN + SW | hils_bridge_lidar_ouster | N/A | Implemented, unverified |
+| Ouster OS1 | USB-LAN + SW | hils_bridge_lidar_ouster | N/A | Implemented, **verified**[^ouster-note] |
+
+[^ouster-note]: For Ouster, the emulator exposes HTTP REST API on port 80, so Docker requires `sysctls: net.ipv4.ip_unprivileged_port_start=80`. See [docs/hils_verification_guide.md](docs/hils_verification_guide.md#13-ouster-os1) for details.
 | GPS (NMEA) | FT234X x 2 | hils_bridge_serial_gps | N/A | Implemented, unverified |
 | IMU (Witmotion) | FT234X x 2 | hils_bridge_serial_imu | N/A | Implemented, unverified |
 
