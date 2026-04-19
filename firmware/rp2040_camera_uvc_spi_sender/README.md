@@ -1,4 +1,4 @@
-# rp2040_cdc_spi_sender
+# rp2040_camera_uvc_spi_sender
 
 Pico#1: USB-CDC receive from simulation PC -> SPI master transmit to Pico#2
 
@@ -22,7 +22,7 @@ make -j$(nproc)
 Hold BOOTSEL, connect USB, then:
 
 ```bash
-cp build/rp2040_cdc_spi_sender.uf2 /media/$USER/RPI-RP2/
+cp build/rp2040_camera_uvc_spi_sender.uf2 /media/$USER/RPI-RP2/
 ```
 
 ## Wiring to Pico#2

@@ -28,7 +28,7 @@ docker compose exec sim bash
 # コンテナ内:
 source /opt/ros/jazzy/setup.bash
 cd ~/colcon_ws && colcon build && source install/setup.bash
-ros2 launch hils_bridge_lidar_velodyne velodyne_emulator.launch.py \
+ros2 launch hils_bridge_lidar_velodyne_vlp16 velodyne_emulator.launch.py \
   device_ip:=192.168.100.201 \
   host_ip:=192.168.100.100 \
   network_interface:=eth0
@@ -69,7 +69,7 @@ docker compose down
 sudo ip addr add 192.168.1.201/24 dev eth1
 
 # エミュレータ起動（Gazebo等のPointCloud2をサブスクライブ）
-ros2 launch hils_bridge_lidar_velodyne velodyne_emulator.launch.py \
+ros2 launch hils_bridge_lidar_velodyne_vlp16 velodyne_emulator.launch.py \
   network_interface:=eth1 \
   host_ip:=192.168.1.100 \
   pointcloud_topic:=/points
@@ -106,7 +106,7 @@ docker compose up -d
 docker compose exec sim bash
 source /opt/ros/jazzy/setup.bash
 cd ~/colcon_ws && colcon build && source install/setup.bash
-ros2 launch hils_bridge_lidar_ouster ouster_emulator.launch.py \
+ros2 launch hils_bridge_lidar_ouster_os1 ouster_emulator.launch.py \
   device_ip:=192.168.100.201 \
   host_ip:=192.168.100.100 \
   network_interface:=eth0 \
@@ -135,7 +135,7 @@ ros2 topic echo --once /ouster/points | head -20
 ```bash
 # --- シミュレーションPC ---
 sudo ip addr add 192.168.1.100/24 dev eth1
-ros2 launch hils_bridge_lidar_ouster ouster_emulator.launch.py \
+ros2 launch hils_bridge_lidar_ouster_os1 ouster_emulator.launch.py \
   network_interface:=eth1 \
   host_ip:=192.168.1.5 \
   pointcloud_topic:=/points
@@ -172,7 +172,7 @@ FT234X #1 (シミュPC側)      FT234X #2 (実機PC側)
 ls /dev/ttyUSB*
 
 # GPSブリッジ起動（fix と vel の両方を subscribe する）
-ros2 launch hils_bridge_serial_gps gps_bridge.launch.py \
+ros2 launch hils_bridge_gps_nmea0183 gps_bridge.launch.py \
   serial_port:=/dev/ttyUSB0 \
   fix_topic:=/gps/fix
   # vel_topic:=/gps/vel  # デフォルト。enable_velocity:=false で無効化可
@@ -216,7 +216,7 @@ ros2 topic echo --once /vel
 
 ```bash
 # --- シミュレーションPC ---
-ros2 launch hils_bridge_serial_imu imu_bridge.launch.py \
+ros2 launch hils_bridge_imu_witmotion_wt901 imu_bridge.launch.py \
   serial_port:=/dev/ttyUSB0 \
   imu_topic:=/imu/data
 
@@ -272,8 +272,8 @@ Pico#1 (CDC-SPI sender)          Pico#2 (UVC bridge)
 
 ```bash
 # 1. ファームウェアをフラッシュ（BOOTSELボタンを押しながら接続）
-cp firmware/rp2040_cdc_spi_sender/build/rp2040_cdc_spi_sender.uf2 /media/$USER/RPI-RP2/
-cp firmware/rp2040_uvc_bridge/build/rp2040_uvc_bridge.uf2 /media/$USER/RPI-RP2/
+cp firmware/rp2040_camera_uvc_spi_sender/build/rp2040_camera_uvc_spi_sender.uf2 /media/$USER/RPI-RP2/
+cp firmware/rp2040_camera_uvc/build/rp2040_camera_uvc.uf2 /media/$USER/RPI-RP2/
 
 # 2. シミュレーションPC: UVCブリッジ起動
 ros2 launch hils_bridge_camera_uvc uvc_bridge.launch.py \
@@ -293,49 +293,83 @@ ros2 topic echo /image_raw --no-arr | head -5
 
 ---
 
-## 4. PWMサーボ + エンコーダエミュレータ（PC + RP2040）
+## 4. RC サーボ PWM エミュレータ（PC + RP2040）
 
-### 必要機材
+PWM サーボ出力（コマンド方向）と クワドラチャエンコーダ出力（フィードバック方向）は別々の firmware／ROS パッケージに分離されている。それぞれ独立した Pico に書き込んで使う。
+
+### 4.1 サーボ PWM 出力
+
+#### 必要機材
 
 - Raspberry Pi Pico H × 1
 - USBケーブル (A-microB) × 1
-- オシロスコープまたはロジックアナライザ（PWM波形確認用）
+- オシロスコープ（PWM波形確認用）
 
-### 配線
+#### 配線
 
 ```
-RP2040 PWM Servo Emulator
+RP2040 (rp2040_actuator_servo_pwm)
   GPIO 2: Servo CH0 PWM出力
   GPIO 3: Servo CH1 PWM出力
   GPIO 4: Servo CH2 PWM出力
   GPIO 5: Servo CH3 PWM出力
+```
+
+#### 手順
+
+```bash
+# 1. ファームウェアをフラッシュ
+cp firmware/rp2040_actuator_servo_pwm/build/rp2040_actuator_servo_pwm.uf2 /media/$USER/RPI-RP2/
+
+# 2. シミュレーションPC: PWM ブリッジ起動
+ros2 launch hils_bridge_actuator_servo_pwm pwm_bridge.launch.py \
+  serial_port:=/dev/ttyACM0
+
+# 3. テスト用 JointState パブリッシュ
+ros2 topic pub /joint_states sensor_msgs/JointState \
+  "{'name': ['joint0', 'joint1'], 'position': [0.0, 1.57]}" \
+  --rate 50
+
+# 4. オシロスコープで GPIO 2-5 の PWM 波形を確認
+#    joint0: 0.0 rad → 1500us (センター)
+#    joint1: 1.57 rad (≈π/2) → 2500us (最大)
+```
+
+### 4.2 クワドラチャエンコーダ出力
+
+#### 必要機材
+
+- Raspberry Pi Pico H × 1（4.1 とは別の Pico）
+- USBケーブル (A-microB) × 1
+- ロジックアナライザ
+
+#### 配線
+
+```
+RP2040 (rp2040_encoder_quadrature)
   GPIO 6: Encoder CH0 A相
   GPIO 7: Encoder CH0 B相
   GPIO 8: Encoder CH1 A相
   GPIO 9: Encoder CH1 B相
 ```
 
-### 手順
+#### 手順
 
 ```bash
 # 1. ファームウェアをフラッシュ
-cp firmware/rp2040_pwm_servo/build/rp2040_pwm_servo.uf2 /media/$USER/RPI-RP2/
+cp firmware/rp2040_encoder_quadrature/build/rp2040_encoder_quadrature.uf2 /media/$USER/RPI-RP2/
 
-# 2. シミュレーションPC: PWMブリッジ起動
-ros2 launch hils_bridge_actuator_pwm pwm_bridge.launch.py \
-  serial_port:=/dev/ttyACM0
+# 2. シミュレーションPC: エンコーダブリッジ起動
+ros2 launch hils_bridge_encoder_quadrature encoder_bridge.launch.py \
+  serial_port:=/dev/ttyACM0 encoder_cpr:=1000
 
-# 3. テスト用JointStateパブリッシュ
+# 3. テスト用 JointState パブリッシュ
 ros2 topic pub /joint_states sensor_msgs/JointState \
   "{'name': ['joint0', 'joint1'], 'position': [0.0, 1.57]}" \
   --rate 50
 
-# 4. オシロスコープでGPIO 2-5のPWM波形を確認
-#    joint0: 0.0 rad → 1500us (センター)
-#    joint1: 1.57 rad (≈π/2) → 2500us (最大)
-
-# 5. ロジックアナライザでGPIO 6-7のエンコーダパルスを確認
-#    A/B相のクワドラチャ信号が出力されるはず
+# 4. ロジックアナライザで GPIO 6-7 (CH0) と GPIO 8-9 (CH1) を観測
+#    joint1=1.57rad, cpr=1000 → 約 250 カウント分の A/B 相パルスが流れる
 ```
 
 ---
@@ -368,10 +402,10 @@ RP2040 I2C Slave                   I2Cマスター (Arduino等)
 
 ```bash
 # 1. ファームウェアをフラッシュ
-cp firmware/rp2040_i2c_slave/build/rp2040_i2c_slave.uf2 /media/$USER/RPI-RP2/
+cp firmware/rp2040_imu_invensense_mpu6050/build/rp2040_imu_invensense_mpu6050.uf2 /media/$USER/RPI-RP2/
 
 # 2. シミュレーションPC: I2Cセンサブリッジ起動
-ros2 launch hils_bridge_sensor_i2c i2c_sensor_bridge.launch.py \
+ros2 launch hils_bridge_imu_invensense_mpu6050 i2c_sensor_bridge.launch.py \
   serial_port:=/dev/ttyACM0
 
 # 3. テスト用Imuパブリッシュ

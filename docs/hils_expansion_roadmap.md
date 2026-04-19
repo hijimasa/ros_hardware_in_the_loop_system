@@ -62,20 +62,20 @@ Phase 0完了後、以下を並行して進められる：
 
 ```
 Agent 1: GPS NMEA bridge (A1)
-  - hils_bridge_serial/hils_bridge_serial_gps/
+  - hils_bridge_gps/hils_bridge_gps_nmea0183/
   - serial_bridge_base を継承
   - NMEAセンテンス生成 ($GPGGA, $GPRMC, $GPVTG)
   - NavSatFix → NMEA変換
 
 Agent 2: Velodyne VLP-16 emulator (A2)
-  - hils_bridge_lidar/hils_bridge_lidar_velodyne/
+  - hils_bridge_lidar/hils_bridge_lidar_velodyne_vlp16/
   - udp_emulator_base を継承
   - VLP-16パケットフォーマット (port 2368/8308)
   - PointCloud2 → Velodyne UDP変換
 
-Agent 3: PWMサーボ + エンコーダ (B1+B2)
-  - firmware/rp2040_pwm_servo/
-  - ros_packages/hils_bridge_actuator/hils_bridge_actuator_pwm/
+Agent 3: RC サーボ PWM (B1) + クワドラチャエンコーダ (B2) — 別 firmware／別 ROS パッケージ
+  - firmware/rp2040_actuator_servo_pwm/  + hils_bridge_actuator/hils_bridge_actuator_servo_pwm/
+  - firmware/rp2040_encoder_quadrature/ + hils_bridge_encoder/hils_bridge_encoder_quadrature/
   - PIOプログラム + CDCブリッジノード
 ```
 
@@ -93,30 +93,34 @@ Phase 1のパターンを流用して残りのデバイスに横展開：
 ## パッケージ構成（完成時）
 
 ```
-ros_packages/
-├── hils_bridge_base/                    # 共通基盤 (Phase 0)
+ros2_hils_bridge/
+├── hils_bridge_base/                          # 共通基盤 (Phase 0)
 │   └── hils_bridge_base/
 │       ├── frame_protocol.py
 │       ├── network_utils.py
 │       ├── serial_bridge_base.py
 │       └── udp_emulator_base.py
 ├── hils_bridge_camera/
-│   └── hils_bridge_camera_uvc/          # 実装済み
+│   └── hils_bridge_camera_uvc/                # 実装済み
 ├── hils_bridge_lidar/
-│   ├── hils_bridge_lidar_livox/         # 実装済み
-│   ├── hils_bridge_lidar_velodyne/      # Phase 1 (A2)
-│   └── hils_bridge_lidar_ouster/        # Phase 2 (A4)
-├── hils_bridge_serial/                  # 新規カテゴリ
-│   ├── hils_bridge_serial_gps/          # Phase 1 (A1)
-│   └── hils_bridge_serial_imu/          # Phase 2 (A3)
-├── hils_bridge_actuator/                # 新規カテゴリ
-│   └── hils_bridge_actuator_pwm/        # Phase 1 (B1+B2)
-└── hils_bridge_sensor/                  # 新規カテゴリ
-    └── hils_bridge_sensor_i2c/          # Phase 2 (B3+B4)
+│   ├── hils_bridge_lidar_livox_mid360/        # 実装済み
+│   ├── hils_bridge_lidar_velodyne_vlp16/      # 実装済み (A2)
+│   └── hils_bridge_lidar_ouster_os1/          # 実装済み (A4)
+├── hils_bridge_gps/
+│   └── hils_bridge_gps_nmea0183/              # 実装済み (A1)
+├── hils_bridge_imu/
+│   ├── hils_bridge_imu_witmotion_wt901/       # 実装済み (A3)
+│   └── hils_bridge_imu_invensense_mpu6050/    # 実装済み (B3)
+├── hils_bridge_actuator/
+│   └── hils_bridge_actuator_servo_pwm/        # 実装済み (B1)
+├── hils_bridge_encoder/
+│   └── hils_bridge_encoder_quadrature/        # 実装済み (B2)
+└── hils_bridge_can/                           # placeholder
 
 firmware/
-├── rp2040_uvc_bridge/                   # 実装済み
-├── rp2040_cdc_spi_sender/               # 実装済み
-├── rp2040_pwm_servo/                    # Phase 1 (B1+B2)
-└── rp2040_i2c_slave/                    # Phase 2 (B3+B4)
+├── rp2040_camera_uvc/                        # 実装済み
+├── rp2040_camera_uvc_spi_sender/             # 実装済み
+├── rp2040_actuator_servo_pwm/                # 実装済み (B1)
+├── rp2040_encoder_quadrature/                # 実装済み (B2)
+└── rp2040_imu_invensense_mpu6050/            # 実装済み (B3)
 ```

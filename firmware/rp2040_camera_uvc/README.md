@@ -1,4 +1,4 @@
-# rp2040_uvc_bridge
+# rp2040_camera_uvc
 
 Pico#2: SPI slave receive from Pico#1 -> TinyUSB UVC MJPEG output to real robot PC
 
@@ -45,7 +45,7 @@ cmake .. -DPICO_SDK_PATH=$PICO_SDK_PATH
 make -j$(nproc)
 ```
 
-Output: `build/rp2040_uvc_bridge.uf2`
+Output: `build/rp2040_camera_uvc.uf2`
 
 ## Flash
 
@@ -54,7 +54,7 @@ Output: `build/rp2040_uvc_bridge.uf2`
 3. Copy UF2:
 
 ```bash
-cp build/rp2040_uvc_bridge.uf2 /media/$USER/RPI-RP2/
+cp build/rp2040_camera_uvc.uf2 /media/$USER/RPI-RP2/
 ```
 
 After reboot, connect the Pico's USB to the **real robot PC** (not the simulation PC).

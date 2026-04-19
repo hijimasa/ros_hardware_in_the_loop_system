@@ -61,14 +61,18 @@ dSPACE、NI VeriStand、Speedgoat、Typhoon HILなどの商用HILプラットフ
 │  │ Isaac Sim│   /image_raw     │ ┌────────────────────────────────┐  │      │
 │  │          │   /imu/data      │ │ livox_emulator_node            │  │      │
 │  │          │   /gps/fix       │ │  PointCloud2 → Livox SDK2 UDP  │──┼──┐   │
-│  │          │                  │ │  (USB-LANアダプタ経由で送信)      │  │  │   │
+│  │          │   /gps/vel       │ │  (USB-LANアダプタ経由で送信)      │  │  │   │
 │  │          │                  │ ├────────────────────────────────┤  │  │   │
 │  │          │                  │ │ uvc_bridge_node                │  │  │   │
 │  │          │                  │ │  image_raw → JPEG → USB CDC    │──┼──┼─┐ │
 │  │          │                  │ ├────────────────────────────────┤  │  │ │ │
-│  │          │                  │ │ gps_bridge_node (将来)          │  │  │ │ │
-│  │          │                  │ │  NavSatFix → NMEA → Serial     │──┼──┼─┼┐│
-│  └──────────┘                  │ └────────────────────────────────┘  │  │ │││
+│  │          │                  │ │ gps_bridge_node                │  │  │ │ │
+│  │          │                  │ │  NavSatFix+TwistStamped         │  │  │ │ │
+│  │          │                  │ │   → NMEA(GGA/RMC) → Serial      │──┼──┼─┼┐│
+│  │          │                  │ ├────────────────────────────────┤  │  │ │││
+│  │          │                  │ │ imu_bridge_node                │  │  │ │││
+│  │          │                  │ │  Imu → WT901 binary → Serial   │──┼──┼─┼┼┤
+│  └──────────┘                  │ └────────────────────────────────┘  │  │ ││││
 │                                └──────────────────────────────────────┘  │ │││
 └─────────────────────────────────────────────────────────────────────────┼─┼┼┼┘
                                                                          │ │││
@@ -134,11 +138,18 @@ HILS Bridge Node         │  TX ──────────── RX    │
 
 **対応プロトコル例：**
 
-| デバイス | プロトコル | ボーレート | 難易度 |
-|---------|-----------|-----------|--------|
-| GPS受信機 | NMEA 0183 (テキスト) | 9600 / 115200 bps | 非常に容易 |
-| シリアルIMU | バイナリ/ASCII (機種依存) | 115200 bps〜 | 容易〜中程度 |
-| 超音波センサ | テキスト/バイナリ | 9600〜115200 bps | 容易 |
+| デバイス | プロトコル | ボーレート | 状態 |
+|---------|-----------|-----------|------|
+| GPS受信機 | NMEA 0183 (GGA/RMC) | 9600 bps | **実装済・動作確認済** (`hils_bridge_gps_nmea0183`) |
+| Witmotion WT901 IMU | バイナリ (0x51/0x52/0x53/0x59) | 115200 bps | **実装済・動作確認済** (`hils_bridge_imu_witmotion_wt901`) |
+| 超音波センサ | テキスト/バイナリ | 9600〜115200 bps | 計画 |
+
+#### 検証済の組合せ
+
+| エミュレータ | 実機ドライバ | 確認済トピック | 主な注意点 |
+|-------------|------------|--------------|------------|
+| `hils_bridge_gps_nmea0183` | `nmea_navsat_driver` | `/fix`, `/vel` | 上流 launch が `port:=/baud:=` 引数を無視するため `ros2 run nmea_navsat_driver nmea_serial_driver --ros-args -p ...` で起動 |
+| `hils_bridge_imu_witmotion_wt901` | `witmotion_ros` (ElettraSciComp/witmotion_IMU_ros, ros2 ブランチ) | `/imu`, `/orientation`, `/magnetometer` | `libqt5serialport5-dev` 必須。Quaternion パケット (0x59) も送信するためデフォルト `use_native_orientation: true` でそのまま動作 |
 
 ### 3.2 Ethernet接続センサ（3D LiDAR等）— USB-LANアダプタ方式
 
@@ -420,11 +431,11 @@ Level 3: 完全HILS
 
 | センサ/デバイス | インターフェース | エミュレーション方式 | 実現難易度 | 推奨HW | 状態 |
 |---------------|----------------|-------------------|----------|--------|------|
-| GPS受信機 | UART (NMEA) | FT234Xクロス接続 + NMEA生成 | ★☆☆☆☆ | FT234X | 未実装 |
-| シリアルIMU | UART (独自プロトコル) | FT234Xクロス接続 + プロトコル生成 | ★★☆☆☆ | FT234X | 未実装 |
-| 3D LiDAR (Livox Mid-360) | Ethernet UDP | USB-LANアダプタ + 純ソフトウェア | ★★☆☆☆ | USB-LANアダプタ | **実装済み** |
-| 3D LiDAR (Velodyne VLP-16) | Ethernet UDP | USB-LANアダプタ + 純ソフトウェア | ★★☆☆☆ | USB-LANアダプタ | スタブ |
-| 3D LiDAR (Ouster OS1) | Ethernet UDP | USB-LANアダプタ + 純ソフトウェア | ★★☆☆☆ | USB-LANアダプタ | スタブ |
+| GPS受信機 | UART (NMEA 0183) | FT234Xクロス接続 + NMEA(GGA/RMC)生成 | ★☆☆☆☆ | FT234X | **実装済・動作確認済** |
+| シリアルIMU (Witmotion WT901) | UART (バイナリ) | FT234Xクロス接続 + WT901バイナリ生成 | ★★☆☆☆ | FT234X | **実装済・動作確認済** |
+| 3D LiDAR (Livox Mid-360) | Ethernet UDP | USB-LANアダプタ + 純ソフトウェア | ★★☆☆☆ | USB-LANアダプタ | **実装済・動作確認済** |
+| 3D LiDAR (Velodyne VLP-16) | Ethernet UDP | USB-LANアダプタ + 純ソフトウェア | ★★☆☆☆ | USB-LANアダプタ | **実装済・動作確認済** |
+| 3D LiDAR (Ouster OS1) | Ethernet UDP + HTTP API | USB-LANアダプタ + 純ソフトウェア | ★★★☆☆ | USB-LANアダプタ | **実装済・動作確認済** |
 | USBカメラ (MJPEG) | USB UVC | RP2040 × 2 + TinyUSB UVC | ★★★☆☆ | RP2040 (Pico H) | **実装済み** |
 | I2C IMU (MPU6050等) | I2C スレーブ | RP2040 PIO I2Cスレーブ | ★★★☆☆ | RP2040 (PIO) | 未実装 |
 | CANモータドライバ | CAN bus | ESP32-S3 TWAI + CANトランシーバ | ★★★☆☆ | ESP32-S3 | 未実装 |
@@ -435,13 +446,15 @@ Level 3: 完全HILS
 
 1. **インターフェース種別ごとに最適な方式を選択することで、マイコンの使用を最小限に抑えつつ、安価なHILSが実現可能。** マイコン（RP2040）が必要なのはUVCカメラエミュレーションのみであり、シリアルセンサはFT234Xクロス接続、LiDARはUSB-LANアダプタ＋純ソフトウェアで対応できる
 
-2. **Livox Mid-360のHILSは実装・動作確認済み。** USB-LANアダプタに`network_interface`パラメータでバインドし、Livox SDK2プロトコルを完全にPythonで実装。全点群20,000点@10Hz送信可能
+2. **3D LiDAR 3機種 (Livox Mid-360 / Velodyne VLP-16 / Ouster OS1) のHILSが実装・動作確認済み。** いずれも純Pythonで対応プロトコル (Livox SDK2 / Velodyne UDP / Ouster UDP+HTTP) を実装。USB-LANアダプタにバインドして実機ドライバ (`livox_ros_driver2`, `velodyne_driver`, `ouster_ros`) で受信できることを確認
 
-3. **UVCカメラのHILSも実装・動作確認済み。** RP2040 2台構成でMJPEGパススルー。640x480@17fps、Raspberry Pi 4でキーボード共存可能
+3. **シリアルセンサ (GPS NMEA / Witmotion WT901 IMU) のHILSも実装・動作確認済み。** FT234X 2 個のクロス接続で `nmea_navsat_driver`, `witmotion_ros` (ElettraSciComp) と接続。WT901 は標準 4 種パケット (0x51/0x52/0x53/0x59) を全て出力し実機互換
 
-4. **最小構成（LiDAR + カメラ）は約3,700円で構築可能。** 従来の見積もり（~17,500円）から大幅にコストダウン
+4. **UVCカメラのHILSも実装・動作確認済み。** RP2040 2台構成でMJPEGパススルー。640x480@17fps、Raspberry Pi 4でキーボード共存可能
 
-5. **ros2_controlの`hardware_interface`抽象化を活用**することで、HILSと実機の切替をソフトウェア設定のみで実現できる設計が望ましい
+5. **最小構成（LiDAR + カメラ）は約3,700円で構築可能。** 従来の見積もり（~17,500円）から大幅にコストダウン
+
+6. **ros2_controlの`hardware_interface`抽象化を活用**することで、HILSと実機の切替をソフトウェア設定のみで実現できる設計が望ましい
 
 ---
 

@@ -1,20 +1,21 @@
 /*
- * HILS PWM Servo + Encoder Emulator - RP2040 Firmware
+ * HILS Quadrature Encoder Emulator - RP2040 Firmware
  *
- * Receives servo angle commands from ROS2 node via USB CDC,
- * outputs PWM servo signals and quadrature encoder pulses via PIO.
+ * Receives target encoder count commands from a ROS 2 node via USB CDC and
+ * emits quadrature A/B pulses on GPIO 6-9 via PIO. Each channel uses two
+ * adjacent GPIOs (A on N, B on N+1).
  *
- * PWM servo output: GPIO 2-5 (up to 4 channels, 50Hz RC servo PWM)
- * Encoder output:   GPIO 6-9 (A0,B0 on 6-7, A1,B1 on 8-9)
+ * This emulates the feedback signal a real motor's encoder would produce,
+ * so the real PC's controller code (which reads the A/B pulses to estimate
+ * motor position) can be tested in a HILS loop.
  *
  * Data flow:
- *   ROS2 (JointState) -> USB CDC -> this firmware -> PIO PWM + Encoder
+ *   ROS 2 (JointState) -> USB CDC -> this firmware -> PIO A/B pulses -> real PC
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
@@ -22,41 +23,31 @@
 #include "hardware/clocks.h"
 
 #include "hils_frame_protocol.h"
-#include "pwm_servo.pio.h"
 #include "encoder_output.pio.h"
 
 /* ---------- Pin assignments ---------- */
-#define SERVO_BASE_PIN      2       /* GPIO 2-5: servo PWM outputs */
 #define ENCODER_BASE_PIN    6       /* GPIO 6-9: encoder A/B outputs */
 #define LED_PIN             25
 
 /* ---------- Configuration ---------- */
-#define MAX_SERVO_CHANNELS  4
 #define MAX_ENCODER_CHANNELS 2
-#define SERVO_PERIOD_US     20000   /* 50Hz = 20ms period */
-#define DEFAULT_PULSE_US    1500    /* Center position */
 
 /* Encoder step frequency (max quadrature steps per second) */
 #define ENCODER_STEP_FREQ   100000.0f  /* 100kHz max step rate */
 
 /* ---------- Message type ---------- */
-#define HILS_MSG_TYPE_SERVO_CMD  0x20
+#define HILS_MSG_TYPE_ENCODER_CMD  0x40
 
-/* ---------- Servo command structures ---------- */
+/* ---------- Encoder command structures ---------- */
 typedef struct __attribute__((packed)) {
-    uint8_t  msg_type;          /* 0x20 */
-    uint8_t  channel_count;     /* Number of channels (1-8) */
-} hils_servo_cmd_header_t;
+    uint8_t  msg_type;          /* 0x40 */
+    uint8_t  channel_count;     /* Number of channels */
+} hils_encoder_cmd_header_t;
 
 typedef struct __attribute__((packed)) {
-    uint8_t  channel;           /* Channel index (0-7) */
-    uint16_t pulse_us;          /* Pulse width in microseconds (500-2500) */
-    int32_t  encoder_count;     /* Target encoder count */
-} hils_servo_channel_t;
-
-/* ---------- Servo state ---------- */
-static uint16_t servo_pulse_us[MAX_SERVO_CHANNELS];
-static bool servo_updated[MAX_SERVO_CHANNELS];
+    uint8_t  channel;           /* Channel index (0-1) */
+    int32_t  target_count;      /* Target encoder count (signed) */
+} hils_encoder_channel_t;
 
 /* ---------- Encoder state ---------- */
 /* Quadrature A/B lookup table (phase 0-3) */
@@ -70,18 +61,14 @@ static const uint8_t quad_table[4] = {
 };
 
 typedef struct {
-    int32_t current_count;      /* Current encoder position */
-    int32_t target_count;       /* Target encoder position */
+    int32_t current_count;      /* Current emulated position */
+    int32_t target_count;       /* Target position (latest command) */
     uint8_t phase;              /* Current quadrature phase (0-3) */
 } encoder_state_t;
 
 static encoder_state_t encoder_state[MAX_ENCODER_CHANNELS];
 
 /* ---------- PIO handles ---------- */
-static PIO servo_pio;
-static uint servo_sm[MAX_SERVO_CHANNELS];
-static uint servo_offset;
-
 static PIO encoder_pio;
 static uint encoder_sm[MAX_ENCODER_CHANNELS];
 static uint encoder_offset;
@@ -167,61 +154,37 @@ static bool process_byte(uint8_t byte) {
 }
 
 /* ---------- Command processing ---------- */
-static void process_servo_command(const uint8_t *payload, uint32_t len) {
-    if (len < sizeof(hils_servo_cmd_header_t)) {
+static void process_encoder_command(const uint8_t *payload, uint32_t len) {
+    if (len < sizeof(hils_encoder_cmd_header_t)) {
         return;
     }
 
-    const hils_servo_cmd_header_t *hdr = (const hils_servo_cmd_header_t *)payload;
-    if (hdr->msg_type != HILS_MSG_TYPE_SERVO_CMD) {
+    const hils_encoder_cmd_header_t *hdr = (const hils_encoder_cmd_header_t *)payload;
+    if (hdr->msg_type != HILS_MSG_TYPE_ENCODER_CMD) {
         return;
     }
 
     uint8_t ch_count = hdr->channel_count;
-    uint32_t expected_len = sizeof(hils_servo_cmd_header_t)
-                          + ch_count * sizeof(hils_servo_channel_t);
+    uint32_t expected_len = sizeof(hils_encoder_cmd_header_t)
+                          + ch_count * sizeof(hils_encoder_channel_t);
     if (len < expected_len) {
         return;
     }
 
-    const hils_servo_channel_t *channels =
-        (const hils_servo_channel_t *)(payload + sizeof(hils_servo_cmd_header_t));
+    const hils_encoder_channel_t *channels =
+        (const hils_encoder_channel_t *)(payload + sizeof(hils_encoder_cmd_header_t));
 
     for (uint8_t i = 0; i < ch_count; i++) {
         uint8_t ch = channels[i].channel;
-
-        /* Update servo PWM */
-        if (ch < MAX_SERVO_CHANNELS) {
-            uint16_t pulse = channels[i].pulse_us;
-            if (pulse < 500) pulse = 500;
-            if (pulse > 2500) pulse = 2500;
-            servo_pulse_us[ch] = pulse;
-            servo_updated[ch] = true;
-        }
-
-        /* Update encoder target */
         if (ch < MAX_ENCODER_CHANNELS) {
-            encoder_state[ch].target_count = channels[i].encoder_count;
+            encoder_state[ch].target_count = channels[i].target_count;
         }
     }
 }
 
 /* ---------- PIO initialization ---------- */
-static void servo_pio_init(void) {
-    servo_pio = pio0;
-    servo_offset = pio_add_program(servo_pio, &pwm_servo_program);
-
-    for (int i = 0; i < MAX_SERVO_CHANNELS; i++) {
-        servo_sm[i] = pio_claim_unused_sm(servo_pio, true);
-        pwm_servo_program_init(servo_pio, servo_sm[i], servo_offset,
-                               SERVO_BASE_PIN + i);
-        servo_pulse_us[i] = DEFAULT_PULSE_US;
-        servo_updated[i] = true;  /* Send initial position */
-    }
-}
-
 static void encoder_pio_init(void) {
-    encoder_pio = pio1;
+    encoder_pio = pio0;
     encoder_offset = pio_add_program(encoder_pio, &encoder_output_program);
 
     for (int i = 0; i < MAX_ENCODER_CHANNELS; i++) {
@@ -238,23 +201,10 @@ static void encoder_pio_init(void) {
     }
 }
 
-/* ---------- Servo update ---------- */
-static void servo_update(void) {
-    for (int i = 0; i < MAX_SERVO_CHANNELS; i++) {
-        if (servo_updated[i]) {
-            servo_updated[i] = false;
-            pwm_servo_set_pulse(servo_pio, servo_sm[i], servo_pulse_us[i]);
-        }
-    }
-}
-
-/* ---------- Encoder update ---------- */
-
-/*
- * Feed encoder steps to PIO.
- * Called from main loop. Generates one quadrature step at a time
- * toward the target position, pushing A/B states to the PIO FIFO.
- * The PIO's clock divider controls the step rate.
+/* ---------- Encoder update ----------
+ * Push quadrature steps into the PIO TX FIFO toward each channel's target.
+ * Non-blocking; runs every main loop iteration. The PIO clock divider sets
+ * the actual pulse output rate.
  */
 static void encoder_update(void) {
     for (int i = 0; i < MAX_ENCODER_CHANNELS; i++) {
@@ -263,14 +213,11 @@ static void encoder_update(void) {
             continue;
         }
 
-        /* Only push if FIFO has space (non-blocking) */
         if (pio_sm_is_tx_fifo_full(encoder_pio, encoder_sm[i])) {
             continue;
         }
 
-        /* Determine number of steps to push (fill FIFO up to capacity) */
         int steps_to_push = abs(diff);
-        /* Limit to available FIFO space (4 entries without FIFO join) */
         int fifo_level = pio_sm_get_tx_fifo_level(encoder_pio, encoder_sm[i]);
         int fifo_free = 4 - fifo_level;
         if (steps_to_push > fifo_free) {
@@ -279,12 +226,10 @@ static void encoder_update(void) {
 
         for (int s = 0; s < steps_to_push; s++) {
             if (diff > 0) {
-                /* Forward: advance phase 0->1->2->3->0 */
                 encoder_state[i].phase = (encoder_state[i].phase + 1) & 0x03;
                 encoder_state[i].current_count++;
                 diff--;
             } else {
-                /* Reverse: retreat phase 0->3->2->1->0 */
                 encoder_state[i].phase = (encoder_state[i].phase - 1) & 0x03;
                 encoder_state[i].current_count--;
                 diff++;
@@ -303,41 +248,31 @@ int main(void) {
     gpio_set_dir(LED_PIN, GPIO_OUT);
     gpio_put(LED_PIN, 0);
 
-    /* Initialize PIO programs */
-    servo_pio_init();
     encoder_pio_init();
-
     reset_state_machine();
 
-    printf("\n[HILS] PWM Servo + Encoder emulator ready\n");
-    printf("[HILS] Servo: GPIO %d-%d, Encoder: GPIO %d-%d\n",
-           SERVO_BASE_PIN, SERVO_BASE_PIN + MAX_SERVO_CHANNELS - 1,
-           ENCODER_BASE_PIN, ENCODER_BASE_PIN + MAX_ENCODER_CHANNELS * 2 - 1);
+    printf("\n[HILS] Quadrature encoder emulator ready\n");
+    printf("[HILS] Encoder: GPIO %d-%d (A,B per channel, %d channels)\n",
+           ENCODER_BASE_PIN,
+           ENCODER_BASE_PIN + MAX_ENCODER_CHANNELS * 2 - 1,
+           MAX_ENCODER_CHANNELS);
 
     uint32_t last_led_toggle = 0;
 
     while (1) {
-        /* Poll USB CDC for incoming frames */
         int count = stdio_usb_in_chars((char *)cdc_buf, CDC_BUF_SIZE);
         if (count > 0) {
             for (int i = 0; i < count; i++) {
                 if (process_byte(cdc_buf[i])) {
-                    process_servo_command(rx_payload, payload_length);
+                    process_encoder_command(rx_payload, payload_length);
                     frame_count++;
-
-                    /* Toggle LED on each received frame */
                     gpio_xor_mask(1u << LED_PIN);
                 }
             }
         }
 
-        /* Update servo PWM outputs */
-        servo_update();
-
-        /* Feed encoder steps toward target positions */
         encoder_update();
 
-        /* Slow blink LED when idle (no recent frames) */
         uint32_t now = time_us_32();
         if (frame_count == 0 && (now - last_led_toggle) >= 1000000) {
             gpio_xor_mask(1u << LED_PIN);
