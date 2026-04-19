@@ -295,25 +295,34 @@ ros2 topic echo /image_raw --no-arr | head -5
 
 ## 4. RC サーボ PWM エミュレータ（PC + RP2040）
 
-PWM サーボ出力（コマンド方向）と クワドラチャエンコーダ出力（フィードバック方向）は別々の firmware／ROS パッケージに分離されている。それぞれ独立した Pico に書き込んで使う。
+PWM サーボ入力（コマンド方向 = ロボット制御器 → サーボ）と クワドラチャエンコーダ出力（フィードバック方向 = モータ → 制御器）は別々の firmware／ROS パッケージに分離されている。それぞれ独立した Pico に書き込んで使う。
 
-### 4.1 サーボ PWM 出力
+### 4.1 サーボ PWM 取り込み（評価用）
+
+ロボット制御器が出力する PWM 信号を RP2040 で計測し、パルス幅（us）および換算した角度をシミュレーション側で評価できるように ROS トピックとしてパブリッシュする。従来は逆方向（シミュレータ→PWM波形生成）であったが、HILS の本来の用途にあわせて書き換えた。
 
 #### 必要機材
 
 - Raspberry Pi Pico H × 1
 - USBケーブル (A-microB) × 1
-- オシロスコープ（PWM波形確認用）
+- 評価対象のロボット制御器（PWM サーボ出力を持つもの）
+- オシロスコープ または ロジックアナライザ（参照用、任意）
 
 #### 配線
 
 ```
+ロボット制御器の PWM 出力 → RP2040 GPIO 入力（3.3V 論理）
 RP2040 (rp2040_actuator_servo_pwm)
-  GPIO 2: Servo CH0 PWM出力
-  GPIO 3: Servo CH1 PWM出力
-  GPIO 4: Servo CH2 PWM出力
-  GPIO 5: Servo CH3 PWM出力
+  GPIO 2: Servo CH0 PWM入力
+  GPIO 3: Servo CH1 PWM入力
+  GPIO 4: Servo CH2 PWM入力
+  GPIO 5: Servo CH3 PWM入力
+  GND  : 制御器 GND と共通
 ```
+
+注意:
+- 制御器の PWM 出力が 5V の場合はレベルシフタまたは分圧抵抗で 3.3V に落とすこと。
+- 未接続の入力は内部プルダウンで LOW 扱いとなり、該当チャンネルは `valid=0` で報告される。
 
 #### 手順
 
@@ -321,18 +330,18 @@ RP2040 (rp2040_actuator_servo_pwm)
 # 1. ファームウェアをフラッシュ
 cp firmware/rp2040_actuator_servo_pwm/build/rp2040_actuator_servo_pwm.uf2 /media/$USER/RPI-RP2/
 
-# 2. シミュレーションPC: PWM ブリッジ起動
+# 2. シミュレーションPC: PWM 取り込みブリッジ起動
 ros2 launch hils_bridge_actuator_servo_pwm pwm_bridge.launch.py \
   serial_port:=/dev/ttyACM0
 
-# 3. テスト用 JointState パブリッシュ
-ros2 topic pub /joint_states sensor_msgs/JointState \
-  "{'name': ['joint0', 'joint1'], 'position': [0.0, 1.57]}" \
-  --rate 50
+# 3. ロボット制御器から PWM を出力（実機 or ベンチ）
 
-# 4. オシロスコープで GPIO 2-5 の PWM 波形を確認
-#    joint0: 0.0 rad → 1500us (センター)
-#    joint1: 1.57 rad (≈π/2) → 2500us (最大)
+# 4. 計測結果を確認
+ros2 topic echo /servo_pwm/pulses_us          # 生パルス幅（us, UInt16MultiArray）
+ros2 topic echo /servo_pwm/joint_states       # 角度換算（JointState, 未計測は NaN）
+
+#    例: 制御器が 1500us を出力 → CH に対応する位置が 0.0 rad
+#        制御器が 2500us を出力 → CH に対応する位置が +π/2 rad（デフォルト設定）
 ```
 
 ### 4.2 クワドラチャエンコーダ出力

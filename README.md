@@ -10,6 +10,9 @@ UVC camera verification (streaming simulation video from Isaac Sim)
 Livox MID360 verification (transmitting ros2 bag data via the native Livox SDK2 protocol)
 ![Livox MID360 HILS demo](./figs/livox_mid360_hils.gif)
 
+RC servo PWM capture verification (measuring the PWM signal from an Arduino controller and publishing it as JointState)
+![RC servo PWM HILS demo](./figs/pwm_servo_hils.gif)
+
 ## Overview
 
 Software simulators (Gazebo / Unity / Isaac Sim) publish directly to ROS topics, which means the actual sensor drivers and physical communication paths (UDP, UART, USB, I2C, etc.) are never tested. This project bridges that gap by converting simulator outputs into device-native protocols, so the real-hardware driver sees what it would see from a real sensor -- all for **under $30 in parts**.
@@ -23,7 +26,7 @@ ros_hardware_in_the_loop_system/
 │   ├── common/                           #   Shared headers (HILS frame protocol)
 │   ├── rp2040_camera_uvc/                #   UVC camera (Pico#2)
 │   ├── rp2040_camera_uvc_spi_sender/     #   USB-CDC -> SPI relay (Pico#1)
-│   ├── rp2040_actuator_servo_pwm/        #   RC servo PWM output
+│   ├── rp2040_actuator_servo_pwm/        #   RC servo PWM capture (controller-side evaluation)
 │   ├── rp2040_encoder_quadrature/        #   Quadrature encoder A/B output
 │   ├── rp2040_imu_invensense_mpu6050/    #   I2C slave MPU-6050 register map
 │   ├── rp2040_ethernet_bridge/           #   Ethernet bridge (reference)
@@ -72,7 +75,7 @@ When adding a new emulator, decide the sensor type, then pick the standard proto
 | Device | Method | ROS Package | Firmware | Status |
 |--------|--------|-------------|----------|--------|
 | USB Camera | RP2040 UVC | hils_bridge_camera_uvc | rp2040_camera_uvc + rp2040_camera_uvc_spi_sender | Implemented, **verified** |
-| RC Servo | RP2040 PIO | hils_bridge_actuator_servo_pwm | rp2040_actuator_servo_pwm | Implemented, unverified |
+| RC Servo (capture) | RP2040 PIO pulse-width measurement | hils_bridge_actuator_servo_pwm | rp2040_actuator_servo_pwm | Implemented, **verified** (Arduino PWM → JointState) |
 | Quadrature Encoder | RP2040 PIO | hils_bridge_encoder_quadrature | rp2040_encoder_quadrature | Implemented, unverified |
 | I2C IMU (MPU-6050) | RP2040 I2C slave | hils_bridge_imu_invensense_mpu6050 | rp2040_imu_invensense_mpu6050 | Implemented, unverified |
 

@@ -15,7 +15,7 @@ add_executable(rp2040_actuator_servo_pwm
 
 # Generate PIO header from .pio file
 pico_generate_pio_header(rp2040_actuator_servo_pwm
-    ${CMAKE_CURRENT_LIST_DIR}/pio/pwm_servo.pio
+    ${CMAKE_CURRENT_LIST_DIR}/pio/pwm_capture.pio
 )
 
 target_include_directories(rp2040_actuator_servo_pwm PRIVATE

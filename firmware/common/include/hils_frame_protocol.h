@@ -148,4 +148,28 @@ typedef struct __attribute__((packed)) {
     uint32_t udp_errors;      /* UDP send error count */
 } hils_lidar_status_t;
 
+/*
+ * Servo PWM capture message types (for PWM servo-input HILS bridge)
+ *
+ * Reverse channel: firmware -> ROS node
+ *   0x21: Measured servo PWM pulse widths (per channel)
+ *
+ * The firmware captures the PWM signal that the robot controller
+ * outputs (instead of generating one) and forwards the measurement
+ * to ROS for evaluation.
+ */
+#define HILS_MSG_TYPE_SERVO_MEASURED  0x21
+
+typedef struct __attribute__((packed)) {
+    uint8_t  msg_type;        /* HILS_MSG_TYPE_SERVO_MEASURED */
+    uint8_t  channel_count;   /* Number of channels reported */
+} hils_servo_measured_header_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  channel;         /* Channel index */
+    uint8_t  valid;           /* 1 if pulse captured recently, 0 if timed out */
+    uint16_t pulse_us;        /* Most recent pulse width in microseconds */
+    uint16_t period_us;       /* Measured period between rising edges (0 if unknown) */
+} hils_servo_measured_channel_t;
+
 #endif /* HILS_FRAME_PROTOCOL_H */

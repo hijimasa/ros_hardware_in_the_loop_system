@@ -1,0 +1,61 @@
+;
+; PIO PWM Capture program
+;
+; Measures the HIGH pulse width of an incoming RC servo PWM signal.
+; Reports the measurement in microseconds via the RX FIFO.
+;
+; Robot controller output -> GPIO input (this SM) -> RX FIFO -> CPU -> USB CDC -> ROS
+;
+; Clock divider sets PIO at 2 MHz so that one count-loop iteration
+; (2 PIO cycles) equals 1 microsecond.
+; Value pushed to RX FIFO is the HIGH pulse width in microseconds
+; (up to 0xFFFFFFFF cycles ~= 4294 s — plenty of head-room).
+;
+; Pin direction: INPUT, pulled down.
+;
+
+.program pwm_capture
+
+.wrap_target
+    wait 0 pin 0          ; sync: ensure signal is currently LOW
+    wait 1 pin 0          ; wait for rising edge (HIGH)
+    mov x, !null          ; x = 0xFFFFFFFF (down counter)
+count_loop:
+    jmp pin dec_counter   ; if pin still HIGH, go decrement x
+    jmp publish           ; pin went LOW -> publish
+dec_counter:
+    jmp x-- count_loop    ; x--; loop if x > 0
+publish:
+    mov isr, !x           ; ISR = ~x = number of count iterations
+    push noblock          ; push measurement to RX FIFO (drops if full)
+.wrap
+
+% c-sdk {
+#include "hardware/clocks.h"
+#include "hardware/gpio.h"
+
+static inline void pwm_capture_program_init(PIO pio, uint sm, uint offset, uint pin) {
+    pio_sm_config c = pwm_capture_program_get_default_config(offset);
+
+    // Use pin as input source for WAIT and as JMP PIN source.
+    sm_config_set_in_pins(&c, pin);
+    sm_config_set_jmp_pin(&c, pin);
+
+    // Configure GPIO as PIO-controlled input with a pull-down so that
+    // a disconnected line reads LOW instead of floating.
+    pio_gpio_init(pio, pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, false);  // input
+    gpio_pull_down(pin);
+
+    // 125 MHz / 62.5 = 2 MHz PIO clock.
+    // One count_loop iteration = 2 PIO cycles = 1 us.
+    float div = (float)clock_get_hz(clk_sys) / 2000000.0f;
+    sm_config_set_clkdiv(&c, div);
+
+    // ISR: shift left, no auto-push (explicit push in program).
+    sm_config_set_in_shift(&c, false, false, 32);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
