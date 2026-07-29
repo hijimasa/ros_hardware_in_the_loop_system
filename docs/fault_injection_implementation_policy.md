@@ -1402,7 +1402,9 @@ docs/
 
 ### 22.1 実装状況(2026-07-29時点)
 
-Phase 1(共通故障注入基盤)は実装済み。
+Phase 1(共通故障注入基盤)およびPhase 2(通信断と再起動)は実装済み。
+
+Phase 1:
 
 * 故障パイプライン:delay(ジッタ含む)、drop、corrupt、duplicate、freeze、reorder
 * シードによる故障系列の再現(ユニットテストで検証済み)
@@ -1411,6 +1413,18 @@ Phase 1(共通故障注入基盤)は実装済み。
   (ループバック実測で注入時刻誤差 0.3〜0.5 ms)
 * 共通基盤への移行:Velodyne、Livox、UVCカメラ(GPS/WT901は`serial_write`経由で自動対応)
 * `hils_bringup`:Velodyne用シナリオ例とlaunch
+
+Phase 2:
+
+* デバイス状態機械(4.2節の状態集合、状態別チャネルゲート、抑止パケット数の記録)
+* `~/set_device_state`、`~/get_device_state`サービス
+* 論理的電源断(8.1節レベル1):`power_off`で全チャネル停止
+* 再起動(7.8節):疑似状態`reboot`で`rebooting`→`boot_duration_sec`後に
+  `reboot_target_state`へ自動遷移
+* シナリオアクション`set_device_state`
+* Livoxの状態連動:電源断・再起動でWorkModeをリセットし、ドライバによる
+  再設定(WorkModeControl再送)を要求。再起動後は`discoverable`へ復帰
+* 電源断中は要求パケットの解析自体を停止(実デバイス同様に無応答)
 
 ### 22.2 未確認事項
 
