@@ -1446,16 +1446,18 @@ Phase 6(初期実装):
   ノードグラフを記録する(6.4節の観測配置をそのまま実装)。
   観測購読はrawモードでペイロードを復号しないため点群でも軽量
 * 対応する期待条件:`topic_timeout`、`topic_resume`、`topic_alive`、
-  `node_alive`/`process_alive`(DDS participantの存在で代理判定)。
-  未対応タイプはFAILではなくSKIPとして報告
+  `node_alive`/`process_alive`(DDS participantの存在で代理判定)、
+  `maximum_message_age`(header.stampと到着時刻の差。rosbag再生の
+  古いstampでは無意味な点に注意)、`diagnostic_level`(/diagnostics
+  のレベル遷移)。未対応タイプはFAILではなくSKIPとして報告
 * レポート:JSON(詳細)とJUnit XML(CI用)を出力し、終了コード0/1で
   合否を返す
 * docker E2E検証:Livox再起動シナリオを実ドライバに対して自動判定
   (停止t=10.00s、復帰t=17.07sを検出しPASS)。負例として
   `reboot_config_policy:=reset`では復帰なしを正しくFAIL判定
   (22.3節のSDK2制約が機械判定可能な回帰テストになった)
-* 未対応(今後):`diagnostic_level`、`maximum_message_age`、
-  `invalid_message_not_published`、rosbag/PCAP自動記録、CI組み込み
+* 未対応(今後):`invalid_message_not_published`、rosbag/PCAP自動記録、
+  CI組み込み(nightly実行)
 
 ### 22.2 未確認事項
 
@@ -1463,9 +1465,18 @@ Phase 6(初期実装):
 
 | 項目 | 内容 | 確認方法 |
 | --- | --- | --- |
-| Ouster実ドライバ疎通 | UDP送信のsend_udp化とHTTP応答フィルタ追加後、`ouster_ros`との正常系を再確認していない(故障なし時はフィルタは素通し) | docker構成で正常系を流し、metadata取得と`/ouster/points`受信を確認 |
 | UVCカメラ実機経路 | SerialBridgeBase移行後、Pico#1/#2経由のUVC出力と解像度逆コマンドを実機で再確認していない | 実機Picoペアで`/dev/video0`出力と`ros2 param`反映を確認 |
-| `hils_bridge_encoder_quadrature`ビルド失敗 | `config/`ディレクトリ欠落によりインストールが失敗する(故障注入実装より前からの既存問題) | `config/default_params.yaml`を追加するかCMakeのinstall対象を修正 |
+
+解消済み:
+
+* Ouster実ドライバ疎通(2026-07-29):`ouster_ros` 0.14.1(apt)で
+  HTTPメタデータ取得→UDP受信の正常系を確認。`/ouster/points`約5Hz
+  (ドライバのスキャン組み立て後)、IMU約187Hz、壁10mがレンジ分布
+  p90=10.7mに出現。`http`チャネルへのdrop注入中も点群ストリームは
+  継続し(設定APIのみ無応答)、解除後にHTTP 200へ復帰することを
+  実ドライバに対して確認
+* `hils_bridge_encoder_quadrature`ビルド失敗:`config/default_params.yaml`
+  を追加して解消(全12パッケージのビルド成功)
 
 ### 22.3 Livox実ドライバ回帰(2026-07-29実施、解消済み)
 
