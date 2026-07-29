@@ -1402,7 +1402,7 @@ docs/
 
 ### 22.1 実装状況(2026-07-29時点)
 
-Phase 1(共通故障注入基盤)およびPhase 2(通信断と再起動)は実装済み。
+Phase 1(共通故障注入基盤)、Phase 2(通信断と再起動)、Phase 3(Ethernet機器への適用)は実装済み。
 
 Phase 1:
 
@@ -1426,6 +1426,18 @@ Phase 2:
   再設定(WorkModeControl再送)を要求。再起動後は`discoverable`へ復帰
 * 電源断中は要求パケットの解析自体を停止(実デバイス同様に無応答)
 
+Phase 3:
+
+* 対象3機種(Livox Mid-360、Velodyne VLP-16、Ouster OS1)すべてが
+  共通故障注入基盤とデバイス状態機械に接続済み
+* チャネル別故障:Livoxはdiscovery/command/data/imu、Velodyneは
+  data/position、Ousterはdata/imu/httpを個別に故障対象化できる
+  (9.1節「Discoveryだけ応答停止」「設定APIだけ応答停止」に対応)
+* Ouster HTTP API故障:`http_status`故障による不正HTTPステータス、
+  corrupt(truncate)による不完全JSON応答、dropによる無応答、
+  delayによる低速応答。電源断状態ではTCP応答なし
+* エミュレータ試験用に`http_port`パラメータを追加(実機互換の既定値80)
+
 ### 22.2 未確認事項
 
 以下は実装変更後の回帰確認が完了していない。解消したらこの節を更新すること。
@@ -1433,6 +1445,7 @@ Phase 2:
 | 項目 | 内容 | 確認方法 |
 | --- | --- | --- |
 | Livox実ドライバ疎通 | UdpEmulatorBase移行後、`livox_ros_driver2`とのDiscovery→WorkMode→点群/IMU受信の一連動作を再確認していない(プロトコル処理ロジック自体は変更なし、送信呼び出しのみ変更) | docker構成(`hils_sim`/`hils_robot`)で正常系を流し、`/livox/lidar`受信と再接続を確認 |
+| Ouster実ドライバ疎通 | UDP送信のsend_udp化とHTTP応答フィルタ追加後、`ouster_ros`との正常系を再確認していない(故障なし時はフィルタは素通し) | docker構成で正常系を流し、metadata取得と`/ouster/points`受信を確認 |
 | UVCカメラ実機経路 | SerialBridgeBase移行後、Pico#1/#2経由のUVC出力と解像度逆コマンドを実機で再確認していない | 実機Picoペアで`/dev/video0`出力と`ros2 param`反映を確認 |
 | `hils_bridge_encoder_quadrature`ビルド失敗 | `config/`ディレクトリ欠落によりインストールが失敗する(故障注入実装より前からの既存問題) | `config/default_params.yaml`を追加するかCMakeのinstall対象を修正 |
 
