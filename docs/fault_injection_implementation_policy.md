@@ -1472,8 +1472,13 @@ Phase 6(初期実装):
   (停止t=10.00s、復帰t=17.07sを検出しPASS)。負例として
   `reboot_config_policy:=reset`では復帰なしを正しくFAIL判定
   (22.3節のSDK2制約が機械判定可能な回帰テストになった)
-* 未対応(今後):`invalid_message_not_published`、rosbag/PCAP自動記録、
-  CI組み込み(nightly実行)
+* rosbag自動記録(`record_bag`。故障前ベースラインから記録)、PCAP記録
+  (`record_pcap`。tcpdumpとCAP_NET_RAWが必要、無ければ警告のみ)
+* CI:`.github/workflows/hils_tests.yml`(ビルド+単体テスト+GPS E2Eを
+  push/PR/nightlyで実行)。ハードウェア不要E2Eは`tools/run_gps_e2e.sh`
+* 未対応(今後):`invalid_message_not_published`、netemバックエンド
+
+未実施作業の引継ぎ手順は[fault_injection_handover.md](fault_injection_handover.md)を参照。
 
 ### 22.2 未確認事項
 
