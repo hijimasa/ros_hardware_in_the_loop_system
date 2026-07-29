@@ -1395,3 +1395,36 @@ docs/
 * 上位アプリケーションの安全側遷移
 
 この方針により、非公開仕様の解析に伴う高い開発コストを避けながら、SILSでは十分に確認できない実ドライバ、OS、物理通信経路、タイムアウト、再接続、異常処理を検証できるHILS基盤を構築する。
+
+---
+
+## 22. 実装状況と確認事項
+
+### 22.1 実装状況(2026-07-29時点)
+
+Phase 1(共通故障注入基盤)は実装済み。
+
+* 故障パイプライン:delay(ジッタ含む)、drop、corrupt、duplicate、freeze、reorder
+* シードによる故障系列の再現(ユニットテストで検証済み)
+* ROS 2制御API:`~/inject_fault`、`~/clear_fault`、`~/get_fault_state`
+* YAMLシナリオ:loader/validator、イベントスケジューラ、`scenario_runner`ノード
+  (ループバック実測で注入時刻誤差 0.3〜0.5 ms)
+* 共通基盤への移行:Velodyne、Livox、UVCカメラ(GPS/WT901は`serial_write`経由で自動対応)
+* `hils_bringup`:Velodyne用シナリオ例とlaunch
+
+### 22.2 未確認事項
+
+以下は実装変更後の回帰確認が完了していない。解消したらこの節を更新すること。
+
+| 項目 | 内容 | 確認方法 |
+| --- | --- | --- |
+| Livox実ドライバ疎通 | UdpEmulatorBase移行後、`livox_ros_driver2`とのDiscovery→WorkMode→点群/IMU受信の一連動作を再確認していない(プロトコル処理ロジック自体は変更なし、送信呼び出しのみ変更) | docker構成(`hils_sim`/`hils_robot`)で正常系を流し、`/livox/lidar`受信と再接続を確認 |
+| UVCカメラ実機経路 | SerialBridgeBase移行後、Pico#1/#2経由のUVC出力と解像度逆コマンドを実機で再確認していない | 実機Picoペアで`/dev/video0`出力と`ros2 param`反映を確認 |
+| `hils_bridge_encoder_quadrature`ビルド失敗 | `config/`ディレクトリ欠落によりインストールが失敗する(故障注入実装より前からの既存問題) | `config/default_params.yaml`を追加するかCMakeのinstall対象を修正 |
+
+### 22.3 パラメータ名の変更(移行時の互換性)
+
+| 対象 | 旧 | 新 | launch引数 |
+| --- | --- | --- | --- |
+| Livoxノード | `lidar_ip` | `device_ip` | `lidar_ip`のまま(内部でマッピング) |
+| カメラノード | `max_fps` | `max_hz` | `max_fps`のまま(内部でマッピング) |
