@@ -61,14 +61,14 @@ When adding a new emulator, decide the sensor type, then pick the standard proto
 
 | Device | Method | ROS Package | Firmware | Status |
 |--------|--------|-------------|----------|--------|
-| Livox Mid-360 | USB-LAN + SW | hils_bridge_lidar_livox_mid360 | N/A | Implemented, **verified**[^fault-refactor-note] |
+| Livox Mid-360 | USB-LAN + SW | hils_bridge_lidar_livox_mid360 | N/A | Implemented, **verified** (incl. fault-injection regression vs livox_ros_driver2) |
 | Velodyne VLP-16 | USB-LAN + SW | hils_bridge_lidar_velodyne_vlp16 | N/A | Implemented, **verified** |
 | Ouster OS1 | USB-LAN + SW | hils_bridge_lidar_ouster_os1 | N/A | Implemented, **verified**[^ouster-note] |
 | GPS (NMEA 0183) | FT234X x 2 | hils_bridge_gps_nmea0183 | N/A | Implemented, **verified** |
 | IMU (Witmotion WT901) | FT234X x 2 | hils_bridge_imu_witmotion_wt901 | N/A | Implemented, **verified**[^witmotion-note] |
 
 [^ouster-note]: For Ouster, the emulator exposes HTTP REST API on port 80, so Docker requires `sysctls: net.ipv4.ip_unprivileged_port_start=80`. See [docs/hils_verification_guide.md](docs/hils_verification_guide.md#13-ouster-os1) for details.
-[^fault-refactor-note]: The 2026-07 fault-injection refactor migrated this node to the shared emulator base classes. Unit tests and standalone startup are confirmed, but end-to-end regression against the real driver (livox_ros_driver2 / UVC host via the Pico pair) has not been re-run since the migration. See "実装状況と確認事項" in [docs/fault_injection_implementation_policy.md](docs/fault_injection_implementation_policy.md).
+[^fault-refactor-note]: The 2026-07 fault-injection refactor migrated this node to the shared emulator base classes. Unit tests and standalone startup are confirmed, but end-to-end regression against the real UVC host via the Pico pair has not been re-run since the migration. See "実装状況と確認事項" in [docs/fault_injection_implementation_policy.md](docs/fault_injection_implementation_policy.md).
 [^witmotion-note]: The IMU emulator emits the four standard WT901 packets (0x51 Accel / 0x52 Gyro / 0x53 Euler / 0x59 Quaternion) so it works with `witmotion_ros` (ElettraSciComp) at default `use_native_orientation: true`. Driver build needs `libqt5serialport5-dev` (already in the Dockerfile). See [docs/hils_verification_guide.md](docs/hils_verification_guide.md#22-シリアルimu-witmotion-wt901) for setup details.
 
 ### Track B: Microcontroller developers (RP2040 firmware)

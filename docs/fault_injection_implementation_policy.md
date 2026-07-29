@@ -1444,12 +1444,52 @@ Phase 3:
 
 | 項目 | 内容 | 確認方法 |
 | --- | --- | --- |
-| Livox実ドライバ疎通 | UdpEmulatorBase移行後、`livox_ros_driver2`とのDiscovery→WorkMode→点群/IMU受信の一連動作を再確認していない(プロトコル処理ロジック自体は変更なし、送信呼び出しのみ変更) | docker構成(`hils_sim`/`hils_robot`)で正常系を流し、`/livox/lidar`受信と再接続を確認 |
 | Ouster実ドライバ疎通 | UDP送信のsend_udp化とHTTP応答フィルタ追加後、`ouster_ros`との正常系を再確認していない(故障なし時はフィルタは素通し) | docker構成で正常系を流し、metadata取得と`/ouster/points`受信を確認 |
 | UVCカメラ実機経路 | SerialBridgeBase移行後、Pico#1/#2経由のUVC出力と解像度逆コマンドを実機で再確認していない | 実機Picoペアで`/dev/video0`出力と`ros2 param`反映を確認 |
 | `hils_bridge_encoder_quadrature`ビルド失敗 | `config/`ディレクトリ欠落によりインストールが失敗する(故障注入実装より前からの既存問題) | `config/default_params.yaml`を追加するかCMakeのinstall対象を修正 |
 
-### 22.3 パラメータ名の変更(移行時の互換性)
+### 22.3 Livox実ドライバ回帰(2026-07-29実施、解消済み)
+
+docker構成(`hils_sim`/`hils_robot`)で、MID-360実機のrosbag
+(`~/git_ws/3D_LIDAR_TEST/ros_ws/exp1_bags`、壁距離2/5/10/15/20mの5本、
+PointCloud2+Imu)をシミュレーションデータ源として`livox_ros_driver2`
+1.2.6に対する回帰を実施した。
+
+正常系(壁10m bag、20秒計測):
+
+| 指標 | bag元データ | ドライバ再発行 |
+| --- | --- | --- |
+| 点群レート | 9.74 Hz | 10.05 Hz |
+| レンジ中央値 | 3.86 m | 3.86 m(完全一致) |
+| レンジ90パーセンタイル | 9.39 m | 9.35 m |
+| IMU | 200 Hz | 受信良好 |
+
+Discovery→設定→WorkMode Normal→点群/IMU受信のSDK2ハンドシェイク一式、
+および電源断→再起動→自動復帰(14.2秒ギャップ後にドライバ無操作で再開)
+を確認した。
+
+#### 発見事項:Livox SDK2は既知デバイスを再設定しない
+
+故障注入により以下のドライバ側特性が判明した。
+
+* SDK2はLidarSearchブロードキャストを1秒周期で送信し続けるが、
+  一度設定が完了したデバイス(既知handle)に対しては、Detection応答を
+  受けても再設定(WorkModeControl再送)を行わない
+  (`GeneralCommandHandler::HandleDetectionData`の`is_update_cfg`は
+  初期設定完了後にリセットされない)
+* コマンドポートへのハートビートは存在せず、SDKはデバイスの消失を
+  検出しない(60秒の無応答でも切断扱いにならない)
+* したがって実機MID-360が電源断から復帰できるのは、デバイス側が
+  WorkMode設定を保持し自律的にストリーミングを再開するためである
+
+これを受け、エミュレータに`reboot_config_policy`パラメータを追加した。
+
+* `preserve`(既定):実機同様、再起動後にWorkModeを復元して自動再開
+* `reset`:再起動でWorkModeを喪失。SDKの上記制約により、ドライバを
+  再起動するまでストリームは復旧しない(ドライバの再接続性欠陥を
+  再現する故障シナリオとして使用可能)
+
+### 22.4 パラメータ名の変更(移行時の互換性)
 
 | 対象 | 旧 | 新 | launch引数 |
 | --- | --- | --- | --- |
