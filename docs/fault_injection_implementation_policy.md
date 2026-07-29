@@ -1402,7 +1402,7 @@ docs/
 
 ### 22.1 実装状況(2026-07-29時点)
 
-Phase 1(共通故障注入基盤)、Phase 2(通信断と再起動)、Phase 3(Ethernet機器への適用)は実装済み。
+Phase 1(共通故障注入基盤)、Phase 2(通信断と再起動)、Phase 3(Ethernet機器への適用)、およびPhase 6の初期実装(試験オラクル)は実装済み。
 
 Phase 1:
 
@@ -1437,6 +1437,25 @@ Phase 3:
   corrupt(truncate)による不完全JSON応答、dropによる無応答、
   delayによる低速応答。電源断状態ではTCP応答なし
 * エミュレータ試験用に`http_port`パラメータを追加(実機互換の既定値80)
+
+Phase 6(初期実装):
+
+* `scenario_oracle`ノード:1プロセス内に2つのrclpyコンテキストを持ち、
+  制御側(simドメイン)でシナリオランナーの進捗・イベント実績時刻を取得、
+  観測側(robotドメイン)へ読み取り専用で参加してトピック到着時刻と
+  ノードグラフを記録する(6.4節の観測配置をそのまま実装)。
+  観測購読はrawモードでペイロードを復号しないため点群でも軽量
+* 対応する期待条件:`topic_timeout`、`topic_resume`、`topic_alive`、
+  `node_alive`/`process_alive`(DDS participantの存在で代理判定)。
+  未対応タイプはFAILではなくSKIPとして報告
+* レポート:JSON(詳細)とJUnit XML(CI用)を出力し、終了コード0/1で
+  合否を返す
+* docker E2E検証:Livox再起動シナリオを実ドライバに対して自動判定
+  (停止t=10.00s、復帰t=17.07sを検出しPASS)。負例として
+  `reboot_config_policy:=reset`では復帰なしを正しくFAIL判定
+  (22.3節のSDK2制約が機械判定可能な回帰テストになった)
+* 未対応(今後):`diagnostic_level`、`maximum_message_age`、
+  `invalid_message_not_published`、rosbag/PCAP自動記録、CI組み込み
 
 ### 22.2 未確認事項
 
