@@ -402,7 +402,7 @@ ros2 topic pub /joint_states sensor_msgs/JointState \
 ### 配線
 
 ```
-RP2040 I2C Slave                   I2Cマスター (Arduino等)
+RP2040 I2C Slave                   I2Cマスター (別のPico等)
   GPIO 4 (SDA) ───────┬──────────── SDA
                       R 4.7kΩ
                       │
@@ -413,6 +413,13 @@ RP2040 I2C Slave                   I2Cマスター (Arduino等)
                      3.3V
   GND ─────────────────────────── GND
 ```
+
+3.3Vはスレーブ側の3V3(OUT)(物理36番ピン)のほか、**GPIO 3(物理5番
+ピン)** も使える。スレーブファームウェアが起動時にGPIO 3をHIGH
+(12mAドライブ)に設定するので、物理5〜8番ピン(プルアップ用3.3V・
+SDA・SCL・GND)だけで配線が完結する。プルアップ2本の消費は最大約
+1.4mAでGPIOの供給能力内。マスターも3.3VロジックのPicoなら
+レベルシフタは不要(5VのArduino Uno等を使う場合は必要)。
 
 ### 手順
 
@@ -433,6 +440,23 @@ ros2 topic pub /imu/data sensor_msgs/Imu \
 #    Arduino: Wire.requestFrom(0x68, 14) でレジスタ 0x3B-0x48 を読み出し
 #    WHO_AM_I (0x75) = 0x68 が返ること
 #    ACCEL_ZOUT = 16384 前後（1g = 16384 LSB）
+#
+#    マスターにPicoを使う場合は専用リーダーファームウェアがある:
+#    cp firmware/rp2040_mpu6050_reader/build/rp2040_mpu6050_reader.uf2 \
+#      /media/$USER/RPI-RP2/
+#    WHO_AM_I確認→wake→100Hzバースト読み+10秒毎のWHO再確認を行い、
+#    結果をCDCテキストで報告する([STAT]/[WHO]/[ERR]/[REINIT]行)。
+#    デバイスは /dev/serial/by-id/ で特定する(ttyACM番号は不定)
+
+# 5. 故障注入(ファームウェア協調故障、方針書22.1節Phase 5)
+#    スレーブがバスから消える:
+ros2 service call /hils_i2c_sensor_bridge/inject_fault \
+  hils_bridge_interfaces/srv/InjectFault \
+  "{fault_yaml: \"fault_type: i2c_nack\nduration_sec: 4.0\"}"
+#    → マスターの[STAT]でnackが増加、解除後に自動回復
+#    他: i2c_response_delay (delay_us: 15000 → timeoutに分類される)、
+#        i2c_reg_freeze (レジスタ値が固定される)、
+#        i2c_who_am_i (value: 0x71 → [WHO] who=0x71 ok=0)
 ```
 
 ---

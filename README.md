@@ -77,7 +77,7 @@ When adding a new emulator, decide the sensor type, then pick the standard proto
 | USB Camera | RP2040 UVC | hils_bridge_camera_uvc | rp2040_camera_uvc + rp2040_camera_uvc_spi_sender | Implemented, **verified** (incl. fault-injection regression via the Pico pair) |
 | RC Servo (capture) | RP2040 PIO pulse-width measurement | hils_bridge_actuator_servo_pwm | rp2040_actuator_servo_pwm | Implemented, **verified** (Arduino PWM → JointState) |
 | Quadrature Encoder | RP2040 PIO | hils_bridge_encoder_quadrature | rp2040_encoder_quadrature | Implemented, unverified |
-| I2C IMU (MPU-6050) | RP2040 I2C slave | hils_bridge_imu_invensense_mpu6050 | rp2040_imu_invensense_mpu6050 | Implemented, unverified |
+| I2C IMU (MPU-6050) | RP2040 I2C slave | hils_bridge_imu_invensense_mpu6050 | rp2040_imu_invensense_mpu6050 (+ rp2040_mpu6050_reader as bus master surrogate) | Implemented, **verified** (incl. firmware fault injection: NACK / response delay / register freeze / WHO_AM_I mismatch) |
 
 ## Quick Start
 

@@ -1468,6 +1468,57 @@ Phase 4:
   (`ValidatePackets(true)`)のためチェックサム不正フレームを破棄し、
   12.1節「異常データを正常値として公開しない」をWT901系でも実証
 
+Phase 5(USBファームウェア協調故障、UVC分。2026-07-31実施):
+
+* プロトコル:フレームプロトコルに0x50番台メッセージを追加
+  (`0x50` FAULT_SET、`0x51` FAULT_CLEAR、`0x52` FAULT_ACK(逆方向)、
+  `0x5F` RESET_BOOTSEL(マジック保護))。定義はC/Python両側で共有
+  (`hils_frame_protocol.h`/`frame_protocol.py`)
+* PC側:`FirmwareFault`基底+`uvc_usb_detach`/`uvc_frame_drop`/
+  `uvc_partial_frame`。`FaultPipeline`に`on_added`/`on_removed`フックと
+  ファームウェア転送(`set_firmware_transport()`、注入・解除・期限切れで
+  自動送信。パイプライン迂回のためdrop故障が自分のclearを飲み込まない)
+  を追加。クラスは`hils_bridge_base`配置でシナリオランナーから検証可能。
+  ファーム無しブリッジ(GPS等)では注入時に明確なエラーで拒否
+* ファームウェア側(`rp2040_camera_uvc`):`fault_handler.c`が
+  detach(`tud_disconnect`+期限付き再接続)、frame_drop(決定論的間引き、
+  乱数不使用)、partial_frame(送信段で切り詰め)を実行し、全コマンドに
+  ACKを返す
+* 実機確認(Picoペア):
+  - `uvc_usb_detach`(reconnect_after_ms=5000):注入直後にホストから
+    デバイス消失(`lsusb`/`/dev/video0`とも)、5秒後に自動再列挙
+  - `uvc_frame_drop`(100%、6秒):ホスト側で115フレーム連続同一
+    (約5.3秒フリーズ)→解除後回復
+  - `uvc_partial_frame`(keep 50%、6秒):**切り詰められたJPEGが
+    UVCホストへ実際に到達**(6秒間で242/256フレームがEOI欠落)。
+    ホスト側の寛容なデコーダでは上部のみ描画された画像になる。
+    22.2節のとおりホスト側byte故障ではPico#1が棄却するため、
+    壊れJPEG系の試験はこのファームウェア故障で行うこと
+  - `RESET_BOOTSEL`:リモートでBOOTSELへ再起動→UF2コピー→再列挙の
+    ラウンドトリップを確認(以後Pico#2の物理BOOTSEL操作は不要)
+* I2C(MPU-6050)側(2026-07-31実施。Pico×2+4.7kΩプルアップ×2、
+  スレーブGPIO3を3.3Vレールとして使用):
+  - スレーブ(`rp2040_imu_invensense_mpu6050`)に4故障を実装:
+    `i2c_nack`(IC_ENABLE=0でバスから消失)、`i2c_response_delay`
+    (トランザクション先頭バイトのクロックストレッチ、arg0=µs)、
+    `i2c_reg_freeze`(シミュレーション更新停止=固定値)、
+    `i2c_who_am_i`(識別レジスタ不一致、arg0=返す値)。
+    0x50番台コマンド・ACK・RESET_BOOTSELはUVCと同一機構を再利用
+  - 実ドライバ代役として`rp2040_mpu6050_reader`(マスター役Pico)を
+    新規作成:WHO_AM_I確認→wake→100Hzバースト読み(0x3B-0x48)+
+    周期WHO再確認(10秒毎)を行い、全結果をCDCテキストで報告
+    (`[STAT]`/`[WHO]`/`[ERR]`/`[REINIT]`行。ホスト側判定に使える)
+  - 実機E2E(全PASS):正常系はaz=16384(1g)・gz=3753(0.5rad/s)の
+    理論値完全一致。nack 4秒=+378 NACK後に自動回復、
+    delay 15ms=全てtimeoutに正しく分類(+298)、
+    reg_freeze 8秒=固定中は入力変更を無視し解除後に追従、
+    who_am_i=故障窓内の周期確認で0x71 ok=0→解除後0x68 ok=1
+  - 発見:RP2040のI2Cマスターは、スレーブ消失でタイムアウトした後
+    コントローラが固着し以後の全トランザクションがtimeoutになる。
+    リーダーにバスリカバリ(SCL 9クロック+deinit/init再初期化)を
+    実装して解消。RP2040ベースの実制御器を被試験対象にする際に
+    同じ罠を踏む可能性がある点は試験観点として有用
+
 Phase 6(初期実装):
 
 * `scenario_oracle`ノード:1プロセス内に2つのrclpyコンテキストを持ち、
