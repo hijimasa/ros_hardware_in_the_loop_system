@@ -1539,8 +1539,23 @@ Phase 6(初期実装):
   (22.3節のSDK2制約が機械判定可能な回帰テストになった)
 * rosbag自動記録(`record_bag`。故障前ベースラインから記録)、PCAP記録
   (`record_pcap`。tcpdumpとCAP_NET_RAWが必要、無ければ警告のみ)
-* CI:`.github/workflows/hils_tests.yml`(ビルド+単体テスト+GPS E2Eを
-  push/PR/nightlyで実行)。ハードウェア不要E2Eは`tools/run_gps_e2e.sh`
+* CI:`.github/workflows/hils_tests.yml`(ビルド+単体テスト+
+  GPS/Velodyne/Ouster E2Eをpush/PR/nightlyで実行)。ハードウェア不要
+  E2Eは`tools/run_{gps,imu,velodyne,ouster}_e2e.sh`
+* LiDAR E2Eのループバック化(2026-07-31):Velodyne/Ousterの
+  故障シナリオをオラクル付き1コマンド回帰にした
+  (`run_velodyne_e2e.sh`=velodyne_power_loss_001、
+  `run_ouster_e2e.sh`=ouster_http_error_001。各PASS確認済み)。
+  - 点群源はデフォルトで合成壁(bag不要、CI可)。`E2E_BAG=<dir>`で
+    実bagに切替可能(MID-360実機bagでもPASS確認済み)
+  - 2コンテナ構成なしで動くよう単一ネームスペース(ループバック)化:
+    Velodyneエミュレータに`bind_data_port`/`bind_position_port`
+    パラメータを追加(0=エフェメラル。宛先は2368のまま、ドライバは
+    ソースIPしか見ない)。Ousterエミュレータはループバックで自分の
+    送信を自分で受信しauto-discoverが宛先を自ポートへ巻き戻す
+    自己フィードバックがあったため、自己エコー無視を追加
+  - `ouster_http_error_001.yaml`の`process_alive`ノード名を実名
+    `os_driver`に修正(旧`ouster_ros`は不一致。オラクル実行は今回が初)
 * 未対応(今後):`invalid_message_not_published`、netemバックエンド
 
 未実施作業の引継ぎ手順は[fault_injection_handover.md](fault_injection_handover.md)を参照。
@@ -1552,6 +1567,16 @@ Phase 6(初期実装):
 
 解消済み:
 
+* E2E基盤の安定化(2026-07-31、LiDAR E2E追加時に発覚):
+  - E2Eスクリプトのcleanupが`ros2 run`/`ros2 launch`ラッパーのみを
+    killし、ノード本体が孤児として残存していた。残った
+    `scenario_runner`が次回実行のオラクルのクロック同期に応答して
+    誤判定(window [0,0]でFAIL)を引き起こす。全E2Eスクリプトを
+    `setsid`+プロセスグループkillに変更して解消
+  - オラクルの観測スレッドをjoinせずにコンテキストを破棄していた
+    ため、判定完了後のシャットダウンでまれにC++層がabortし
+    exit codeが化ける(判定はPASSでもCIが赤になる)。
+    `shutdown_observation()`にjoinを追加して解消
 * UVCホスト互換性の改善(2026-07-31):`usb_cam`(0.8.1)で映像取得
   できなかった2要因を解消し、`pixel_format:=mjpeg2rgb`で15Hz取得・
   解像度逆コマンド・drop故障のフリーズ/回復を実機確認した。

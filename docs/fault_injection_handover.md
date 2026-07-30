@@ -84,9 +84,14 @@ ros2 run hils_bridge_base scenario_runner --ros-args \
   -p scenario_file:=<scenario.yaml>
 ```
 
-ハードウェア不要のGPS E2Eは1コマンド: `bash tools/run_gps_e2e.sh`
-(ビルド済みws・`nmea_navsat_driver`・socatが必要)。WT901版は
-`bash tools/run_imu_e2e.sh`(`witmotion_ros`のビルドが必要)。
+ハードウェア不要のE2Eは各1コマンド(ビルド済みws前提):
+- GPS: `bash tools/run_gps_e2e.sh`(`nmea_navsat_driver`+socat)
+- WT901: `bash tools/run_imu_e2e.sh`(`witmotion_ros`のビルドが必要)
+- Velodyne: `bash tools/run_velodyne_e2e.sh`(`velodyne-driver`/
+  `velodyne-pointcloud`。ループバックUDP、点群源は合成壁または
+  `E2E_BAG=<bagディレクトリ>`)
+- Ouster: `bash tools/run_ouster_e2e.sh`(`ouster-ros`。HTTP port 80の
+  bind権限が必要=rootまたは`ip_unprivileged_port_start=80`)
 
 ---
 
@@ -195,13 +200,19 @@ Phase 5を参照。注入は通常の`~/inject_fault`サービスから
 - オラクル判定タイプ`invalid_message_not_published`(不正データが
   トピックに現れないことの内容検査。メッセージ内容の検証が必要で、
   現状の到着時刻ベース観測では判定できない)
-- CIの初回実行確認(pushすると`.github/workflows/hils_tests.yml`が動く。
-  ros:jazzyコンテナ内のsocat/E2EがGitHub Actions環境で通るかは未確認)
 - netemバックエンド(方針書4.5節): 統計的トランスポート故障のtc qdisc
   連携は設計のみで未実装
-- Velodyne/Ousterの故障シナリオ(`velodyne_*.yaml`、
-  `ouster_http_error_001.yaml`)のオラクル付き定期実行化
-  (点群データ源が必要。MID-360 bagのトピックリマップで流用可)
+
+解消済み:
+
+- CIの初回実行確認(2026-07-31): push後のGitHub Actionsでエラーなし
+- Velodyne/Ouster故障シナリオのオラクル付き定期実行化(2026-07-31):
+  `run_velodyne_e2e.sh`/`run_ouster_e2e.sh`としてループバック1コマンド化
+  しCIにも追加(方針書22.1節Phase 6参照)。点群源はデフォルト合成壁、
+  `E2E_BAG`で実bag切替(livox_20251219_175610でPASS確認済み)。
+  未対応シナリオ: `velodyne_corrupt_drop_001`/`velodyne_delay_jitter_001`/
+  `velodyne_reboot_001`/`livox_reboot_001`はスクリプト化していない
+  (SCENARIOを差し替えれば同じ枠組みで実行可能)
 
 ## 5. 運用メモ
 
