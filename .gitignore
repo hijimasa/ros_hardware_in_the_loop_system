@@ -54,3 +54,6 @@ CATKIN_IGNORE
 pico_sdk_import.cmake
 
 .claude/
+
+# Schematic editor auto-history
+.history/

@@ -68,14 +68,13 @@ When adding a new emulator, decide the sensor type, then pick the standard proto
 | IMU (Witmotion WT901) | FT234X x 2 | hils_bridge_imu_witmotion_wt901 | N/A | Implemented, **verified**[^witmotion-note] |
 
 [^ouster-note]: For Ouster, the emulator exposes HTTP REST API on port 80, so Docker requires `sysctls: net.ipv4.ip_unprivileged_port_start=80`. See [docs/hils_verification_guide.md](docs/hils_verification_guide.md#13-ouster-os1) for details.
-[^fault-refactor-note]: The 2026-07 fault-injection refactor migrated this node to the shared emulator base classes. Unit tests and standalone startup are confirmed, but end-to-end regression against the real UVC host via the Pico pair has not been re-run since the migration. See "実装状況と確認事項" in [docs/fault_injection_implementation_policy.md](docs/fault_injection_implementation_policy.md).
 [^witmotion-note]: The IMU emulator emits the four standard WT901 packets (0x51 Accel / 0x52 Gyro / 0x53 Euler / 0x59 Quaternion) so it works with `witmotion_ros` (ElettraSciComp) at default `use_native_orientation: true`. Driver build needs `libqt5serialport5-dev` (already in the Dockerfile). See [docs/hils_verification_guide.md](docs/hils_verification_guide.md#22-シリアルimu-witmotion-wt901) for setup details.
 
 ### Track B: Microcontroller developers (RP2040 firmware)
 
 | Device | Method | ROS Package | Firmware | Status |
 |--------|--------|-------------|----------|--------|
-| USB Camera | RP2040 UVC | hils_bridge_camera_uvc | rp2040_camera_uvc + rp2040_camera_uvc_spi_sender | Implemented, **verified**[^fault-refactor-note] |
+| USB Camera | RP2040 UVC | hils_bridge_camera_uvc | rp2040_camera_uvc + rp2040_camera_uvc_spi_sender | Implemented, **verified** (incl. fault-injection regression via the Pico pair) |
 | RC Servo (capture) | RP2040 PIO pulse-width measurement | hils_bridge_actuator_servo_pwm | rp2040_actuator_servo_pwm | Implemented, **verified** (Arduino PWM → JointState) |
 | Quadrature Encoder | RP2040 PIO | hils_bridge_encoder_quadrature | rp2040_encoder_quadrature | Implemented, unverified |
 | I2C IMU (MPU-6050) | RP2040 I2C slave | hils_bridge_imu_invensense_mpu6050 | rp2040_imu_invensense_mpu6050 | Implemented, unverified |

@@ -286,8 +286,15 @@ v4l2-ctl --list-devices
 
 # 4. 実機PC: 映像確認
 ffplay /dev/video0
-# または
-ros2 run usb_cam usb_cam_node_exe --ros-args -p video_device:=/dev/video0
+# または usb_cam で確認
+# NOTE: 本カメラは MJPG のみのため pixel_format 指定が必須
+#       (デフォルトの yuyv では起動しない)。mjpeg2rgb でのデコードは
+#       エミュレータ側が 4:2:2 JPEG を送ること・ファームウェアが
+#       Discrete フレームインターバルを列挙することが前提
+#       (2026-07-31 以降のブリッジ+ファームウェアで対応済み)
+ros2 run usb_cam usb_cam_node_exe --ros-args \
+  -p video_device:=/dev/video0 -p pixel_format:=mjpeg2rgb \
+  -p image_width:=640 -p image_height:=480 -p framerate:=15.0
 ros2 topic echo /image_raw --no-arr | head -5
 ```
 

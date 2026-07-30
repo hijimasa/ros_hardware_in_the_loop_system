@@ -1,0 +1,19 @@
+# Override for the UVC camera real-path regression (handover section
+# 3.2): passes the Pico pair into the sim container - Pico#1 (CDC-UART
+# sender) as /dev/ttyACM0 for the bridge, and Pico#2 (enumerating as a
+# UVC camera) as /dev/video0-1 for the host-side check. Use only while
+# the pair is plugged in (see docker-compose.serial.yml for the FT234X
+# pair; combine as needed).
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml \
+#                  -f docker/docker-compose.uvc.yml up -d sim
+services:
+  sim:
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+    group_add:
+      - dialout
+      - video

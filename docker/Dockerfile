@@ -15,7 +15,7 @@ RUN apt-get update -y -qq && \
     apt-get install -y -qq \
       vim v4l-utils \
       software-properties-common \
-      git wget curl unzip \
+      git wget curl unzip socat \
       python3-pip \
       libopencv-dev libeigen3-dev \
       libpcap-dev libyaml-cpp-dev \

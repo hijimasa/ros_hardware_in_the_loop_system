@@ -1,0 +1,17 @@
+# Override for USB-serial regression (handover section 3.1): passes the
+# FT234X cross-connected pair (/dev/ttyUSB0 <-> /dev/ttyUSB1) into the sim
+# container so the E2E scripts can exercise the real FTDI/OS serial stack
+# instead of a socat pty pair. Compose has no optional devices, so use
+# this file only while the pair is plugged in (docker-compose.uvc.yml is
+# the equivalent for the UVC Pico pair; combine as needed).
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml \
+#                  -f docker/docker-compose.serial.yml up -d sim
+services:
+  sim:
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/ttyUSB1:/dev/ttyUSB1
+    group_add:
+      - dialout

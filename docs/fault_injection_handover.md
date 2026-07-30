@@ -28,7 +28,9 @@
 | --- | --- | --- |
 | livox_ros_driver2 1.2.6 | 正常系(bag→エミュレータ→ドライバ、レンジ中央値完全一致)、電源断→再起動の自動復帰、reset時の復帰不能(負例) | 方針書22.3節 |
 | ouster_ros 0.14.1 | 正常系(HTTPメタデータ+UDP)、設定APIのみ無応答中のストリーム継続 | 方針書22.2節 |
-| nmea_navsat_driver | チェックサム不正で/fix停止・ドライバ生存・復帰(PTYペア、オラクル自動判定PASS) | 方針書22.1節Phase 4 |
+| nmea_navsat_driver | チェックサム不正で/fix停止・ドライバ生存・復帰(PTYペアおよびFT234X実機経路、オラクル自動判定PASS) | 方針書22.1節Phase 4 |
+| witmotion_ros (ElettraSciComp) | wt901_checksum故障で/imu停止・ドライバ生存・復帰(PTYペアおよびFT234X実機経路、オラクル自動判定PASS) | 方針書22.1節Phase 4 |
+| UVCホスト(Linux uvcvideo) | Picoペア実機で正常系(映像+解像度逆コマンド)、drop/corrupt/delayのフリーズ・回復挙動 | 方針書22.2節 |
 
 ### 1.3 主要な発見事項
 
@@ -83,46 +85,62 @@ ros2 run hils_bridge_base scenario_runner --ros-args \
 ```
 
 ハードウェア不要のGPS E2Eは1コマンド: `bash tools/run_gps_e2e.sh`
-(ビルド済みws・`nmea_navsat_driver`・socatが必要)。
+(ビルド済みws・`nmea_navsat_driver`・socatが必要)。WT901版は
+`bash tools/run_imu_e2e.sh`(`witmotion_ros`のビルドが必要)。
 
 ---
 
 ## 3. 未実施作業(ハードウェアが必要)
 
-### 3.1 FT234X×2でのGPS/WT901実機回帰
+### 3.1 FT234X×2でのGPS/WT901実機回帰(2026-07-29完了)
 
-PTYペアでのE2Eは完了しているが、**USBシリアルのOSスタック(FTDIドライバ、
-実ボーレート、バッファリング)を経由した検証は未実施**。
+**完了済み。** FT234X×2クロス接続(`/dev/ttyUSB0`↔`/dev/ttyUSB1`)を
+`docker/docker-compose.serial.yml`(新規)でsimコンテナへパススルーし、
+GPS・WT901とも実ポートでPTY版と同一の3件PASSを確認した。
+結果詳細は方針書22.1節Phase 4・22.2節を参照。
 
-必要機材: FT234X×2をクロス接続(TX↔RX)、PC1台(または2台)。
+再現方法(1コマンド、simコンテナ内):
 
-手順:
-1. `tools/run_gps_e2e.sh`を参考に、socatの代わりに実ポートを使う:
-   ブリッジ側`serial_port:=/dev/ttyUSB0`、ドライバ側`port:=/dev/ttyUSB1`、
-   両方`baudrate/baud:=9600`
-2. シナリオ`gps_checksum_error_001.yaml`をランナー+オラクルで実行
-3. 期待: PTY版と同じ(3件PASS)。差が出る場合はボーレート起因の
-   フレーム分割(1 writeが複数readに割れる)が疑い所
-4. WT901: `witmotion_ros`をビルドし(`libqt5serialport5-dev`必要、
-   docker imageには導入済み)、`wt901_checksum`故障で同様の試験。
-   シナリオは`gps_checksum_error_001.yaml`を雛形に`target: /hils_imu_bridge`、
-   `fault_type: wt901_checksum`、トピック`/imu`系へ書き換え
-5. 完了したら方針書22.2節の表を更新
+```bash
+# GPS (9600 baud)
+E2E_SERIAL_BRIDGE=/dev/ttyUSB0 E2E_SERIAL_DRIVER=/dev/ttyUSB1 \
+  bash tools/run_gps_e2e.sh
+# WT901 (115200 baud、witmotion_rosのビルドが必要)
+E2E_SERIAL_BRIDGE=/dev/ttyUSB0 E2E_SERIAL_DRIVER=/dev/ttyUSB1 \
+  bash tools/run_imu_e2e.sh
+```
 
-### 3.2 UVCカメラ実機経路の回帰(§22.2の未確認事項)
+環境変数を省略すると従来どおりsocat PTYペアで動く(ハードウェア不要)。
+WT901用に`scenarios/imu/wt901_checksum_error_001.yaml`と
+`tools/run_imu_e2e.sh`を追加した。socatはdockerイメージに追加済み
+(旧イメージを使う場合は`apt install socat`)。
 
-SerialBridgeBase移行後、Picoペア経由の実機確認が未実施。
+注意: `witmotion_ros`の既定`timeout_ms: 150`はブリッジ起動との
+レースでSUSPENDED→segfaultに至るため、`run_imu_e2e.sh`は設定パッチで
+2000msへ拡大している(方針書22.2節の発見事項参照)。
 
-必要機材: RP2040×2(`rp2040_camera_uvc_spi_sender`+`rp2040_camera_uvc`
-ファームウェア書き込み済み)、SPI配線、ホストPC。
+### 3.2 UVCカメラ実機経路の回帰(2026-07-30完了)
 
-手順:
-1. 正常系: `/image_raw`を流し、ホストPCの`/dev/video0`に映像が出ること、
-   解像度逆コマンド(`ros2 param`への反映)を確認
-2. 故障注入: `/hils_uvc_bridge/inject_fault`でdrop(映像停止)、
-   corrupt(壊れJPEG)、delay(フレーム遅延)を注入し、UVCホスト側の
-   挙動(フリーズ/回復)を確認
-3. 完了したら方針書22.2節とREADMEの脚注`[^fault-refactor-note]`を解消
+**完了済み。** Picoペア実機で正常系(映像出力+解像度逆コマンド)と
+故障注入(drop/corrupt/delay)を確認した。結果と発見事項の詳細は
+方針書22.2節を参照。README脚注`[^fault-refactor-note]`も解消済み。
+
+要点:
+- 3故障ともUVCホストには「映像フリーズ」として現れる(Pico#2が
+  最終フレームを再送し続けるためUVCストリーム自体は止まらない)。
+  corruptはPico#1のフレームチェックサム検証で棄却されるため
+  壊れJPEGはホストに届かない(当初期待の「corrupt=壊れJPEG」は
+  プロトコル設計上発生しない、が正しい挙動)
+- Pico#1のファームウェア書き換えはBOOTSELボタン不要
+  (1200baudタッチ→`/media/$USER/RPI-RP2`へuf2コピー)
+- 相手ファームウェアがCDCを読まない場合にブリッジが無限停止する
+  問題はSerialBridgeBaseの`write_timeout_sec`(既定1.0s)で対策済み
+- コンテナへのデバイス受け渡しは`docker/docker-compose.uvc.yml`
+  (`/dev/ttyACM0`+`/dev/video0-1`)を使用
+- 追記(2026-07-31): `usb_cam`(`pixel_format:=mjpeg2rgb`)での取得に
+  対応した。UVCディスクリプタのDiscrete化(要Pico#2再書き込み)と
+  ブリッジの4:2:2 JPEGエンコード化の2点が必要だった。詳細は
+  方針書22.2節「UVCホスト互換性の改善」を参照
 
 ### 3.3 Phase 5: USBファームウェア協調故障
 
