@@ -12,7 +12,7 @@
 
 | コンポーネント | 場所 | 状態 |
 | --- | --- | --- |
-| 故障パイプライン(9種+プロトコル故障2種) | `hils_bridge_base/fault_injection/` | 実装・単体テスト済み |
+| 故障パイプライン(9種+プロトコル故障2種+ファームウェア協調7種+netem) | `hils_bridge_base/fault_injection/` | 実装・単体テスト済み |
 | デバイス状態機械(電源断・再起動) | `hils_bridge_base/device_state/` | 実装・単体テスト済み |
 | YAMLシナリオランナー | `hils_bridge_base/scenario/` | 実装・E2E済み |
 | 試験オラクル(自動合否判定+JSON/JUnit XML+rosbag/PCAP記録) | `hils_bridge_base/observation/`, `reporting/` | 実装・E2E済み |
@@ -197,13 +197,18 @@ Phase 5を参照。注入は通常の`~/inject_fault`サービスから
 
 ## 4. ソフトウェア側の残タスク(ハードウェア不要だが未実施)
 
-- オラクル判定タイプ`invalid_message_not_published`(不正データが
-  トピックに現れないことの内容検査。メッセージ内容の検証が必要で、
-  現状の到着時刻ベース観測では判定できない)
-- netemバックエンド(方針書4.5節): 統計的トランスポート故障のtc qdisc
-  連携は設計のみで未実装
+**すべて解消済み(2026-07-31時点で§4の残タスクなし)。**
 
 解消済み:
+
+- オラクル判定タイプ`invalid_message_not_published`(2026-07-31):
+  内容検査を実装。使用例は`gps_checksum_error_001.yaml`の
+  latitude/longitude境界検査、仕様は`observation/expectations.py`の
+  docstringを参照
+- netemバックエンド(2026-07-31): `fault_type: netem`として実装
+  (方針書22.1節Phase 6参照)。CAP_NET_ADMIN+iproute2+tcへのsetcapが
+  前提(compose/Dockerfileに反映済み。**既存イメージ・コンテナは
+  再ビルド/再作成が必要**)
 
 - CIの初回実行確認(2026-07-31): push後のGitHub Actionsでエラーなし
 - Velodyne/Ouster故障シナリオのオラクル付き定期実行化(2026-07-31):

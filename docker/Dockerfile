@@ -15,13 +15,18 @@ RUN apt-get update -y -qq && \
     apt-get install -y -qq \
       vim v4l-utils \
       software-properties-common \
-      git wget curl unzip socat \
+      git wget curl unzip socat iproute2 \
       python3-pip \
       libopencv-dev libeigen3-dev \
       libpcap-dev libyaml-cpp-dev \
       libqt5serialport5-dev qtbase5-dev && \
     apt-get autoremove -y -qq && \
     rm -rf /var/lib/apt/lists/*
+
+# Let the non-root emulator user apply netem qdiscs (docs 4.5). Takes
+# effect only when the container itself has CAP_NET_ADMIN (compose adds
+# it to the sim service).
+RUN setcap cap_net_admin+ep "$(command -v tc)"
 
 # ── ROS packages ──
 RUN apt-get update && apt-get install -y --no-install-recommends \

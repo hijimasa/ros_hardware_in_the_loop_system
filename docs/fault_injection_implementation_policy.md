@@ -1556,7 +1556,22 @@ Phase 6(初期実装):
     自己フィードバックがあったため、自己エコー無視を追加
   - `ouster_http_error_001.yaml`の`process_alive`ノード名を実名
     `os_driver`に修正(旧`ouster_ros`は不一致。オラクル実行は今回が初)
-* 未対応(今後):`invalid_message_not_published`、netemバックエンド
+* `invalid_message_not_published`(2026-07-31実装):内容検査の
+  期待条件。観測側が対象トピックをデシリアライズしてドット区切り
+  fieldの値を記録し、min/max境界と有限性(NaN/inf)を検証する。
+  メッセージが無い窓はPASS(不正データの不在)であり、トラフィック
+  要求は`topic_alive`等と組み合わせる。`gps_checksum_error_001`に
+  latitude/longitudeの境界検査を追加済み(E2E 5件PASS)
+* netemバックエンド(2026-07-31実装、4.5節):`fault_type: netem`と
+  して故障パイプラインに統合。注入でエミュレータ自身のネームスペース
+  の指定インターフェースに`tc qdisc replace ... netem`を適用し、
+  解除・期限切れで削除する。delay/jitter/loss/duplicate/reorder/
+  corrupt/rateに対応、インターフェースあたり1個まで。適用したtc
+  コマンドは`parameters()`経由で故障イベントログと状態照会に記録
+  される(4.5節の記録要件)。実行にはCAP_NET_ADMIN(composeのsimに
+  付与済み)とiproute2が必要で、非rootノード用にDockerfileで
+  `setcap cap_net_admin+ep tc`を行う。ループバック実測で
+  delay 200ms注入時にUDP片道0.0ms→200.1ms→解除後0.0msを確認
 
 未実施作業の引継ぎ手順は[fault_injection_handover.md](fault_injection_handover.md)を参照。
 

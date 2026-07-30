@@ -38,6 +38,10 @@ services:
     sysctls:
       # Allow unprivileged binding to ports >= 80 (for Ouster HTTP API on port 80)
       - net.ipv4.ip_unprivileged_port_start=80
+    cap_add:
+      # netem fault backend (docs 4.5): the emulator applies tc qdisc
+      # to its own egress interface on inject_fault fault_type: netem
+      - NET_ADMIN
     entrypoint: ["tail", "-f", "/dev/null"]    # keep container running
 
   robot:
