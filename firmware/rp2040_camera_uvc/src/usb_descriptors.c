@@ -77,9 +77,13 @@ typedef struct TU_ATTR_PACKED {
     tusb_desc_interface_t                         itf;      /* Alt 0: zero-bandwidth */
     tusb_desc_video_streaming_input_header_1byte_t header;
     tusb_desc_video_format_mjpeg_t                format;
-    tusb_desc_video_frame_mjpeg_continuous_t       frame_320x240;
-    tusb_desc_video_frame_mjpeg_continuous_t       frame_640x480;
-    tusb_desc_video_frame_mjpeg_continuous_t       frame_1280x720;
+    /* Discrete frame intervals (bFrameIntervalType=3): many UVC hosts,
+     * including ros usb_cam, enumerate only DISCRETE intervals and cannot
+     * open a camera that advertises a continuous/stepwise range. Real
+     * cameras almost universally advertise discrete intervals too. */
+    tusb_desc_video_frame_mjpeg_3int_t             frame_320x240;
+    tusb_desc_video_frame_mjpeg_3int_t             frame_640x480;
+    tusb_desc_video_frame_mjpeg_3int_t             frame_1280x720;
     tusb_desc_video_streaming_color_matching_t     color;
     tusb_desc_interface_t                         itf_alt;  /* Alt 1: operational */
     tusb_desc_endpoint_t                          ep;
@@ -205,7 +209,7 @@ static const uvc_cfg_desc_t desc_fs_configuration = {
         },
         /* Frame 1: 320x240 */
         .frame_320x240 = {
-            .bLength                  = sizeof(tusb_desc_video_frame_mjpeg_continuous_t),
+            .bLength                  = sizeof(tusb_desc_video_frame_mjpeg_3int_t),
             .bDescriptorType          = TUSB_DESC_CS_INTERFACE,
             .bDescriptorSubType       = VIDEO_CS_ITF_VS_FRAME_MJPEG,
             .bFrameIndex              = FRAME_INDEX_320x240,
@@ -216,16 +220,16 @@ static const uvc_cfg_desc_t desc_fs_configuration = {
             .dwMaxBitRate             = 10000 * 8 * FRAME_RATE,
             .dwMaxVideoFrameBufferSize = 65536,
             .dwDefaultFrameInterval   = 10000000 / FRAME_RATE,
-            .bFrameIntervalType       = 0, /* continuous */
+            .bFrameIntervalType       = 3, /* discrete: 15/10/5 fps */
             .dwFrameInterval          = {
                 10000000 / FRAME_RATE,
-                10000000,
-                10000000 / FRAME_RATE,
+                1000000,
+                2000000,
             },
         },
         /* Frame 2: 640x480 (default) */
         .frame_640x480 = {
-            .bLength                  = sizeof(tusb_desc_video_frame_mjpeg_continuous_t),
+            .bLength                  = sizeof(tusb_desc_video_frame_mjpeg_3int_t),
             .bDescriptorType          = TUSB_DESC_CS_INTERFACE,
             .bDescriptorSubType       = VIDEO_CS_ITF_VS_FRAME_MJPEG,
             .bFrameIndex              = FRAME_INDEX_640x480,
@@ -236,16 +240,16 @@ static const uvc_cfg_desc_t desc_fs_configuration = {
             .dwMaxBitRate             = 30000 * 8 * FRAME_RATE,
             .dwMaxVideoFrameBufferSize = 65536,
             .dwDefaultFrameInterval   = 10000000 / FRAME_RATE,
-            .bFrameIntervalType       = 0,
+            .bFrameIntervalType       = 3, /* discrete: 15/10/5 fps */
             .dwFrameInterval          = {
                 10000000 / FRAME_RATE,
-                10000000,
-                10000000 / FRAME_RATE,
+                1000000,
+                2000000,
             },
         },
         /* Frame 3: 1280x720 */
         .frame_1280x720 = {
-            .bLength                  = sizeof(tusb_desc_video_frame_mjpeg_continuous_t),
+            .bLength                  = sizeof(tusb_desc_video_frame_mjpeg_3int_t),
             .bDescriptorType          = TUSB_DESC_CS_INTERFACE,
             .bDescriptorSubType       = VIDEO_CS_ITF_VS_FRAME_MJPEG,
             .bFrameIndex              = FRAME_INDEX_1280x720,
@@ -256,11 +260,11 @@ static const uvc_cfg_desc_t desc_fs_configuration = {
             .dwMaxBitRate             = 80000 * 8 * FRAME_RATE,
             .dwMaxVideoFrameBufferSize = 65536,
             .dwDefaultFrameInterval   = 10000000 / FRAME_RATE,
-            .bFrameIntervalType       = 0,
+            .bFrameIntervalType       = 3, /* discrete: 15/10/5 fps */
             .dwFrameInterval          = {
                 10000000 / FRAME_RATE,
-                10000000,
-                10000000 / FRAME_RATE,
+                1000000,
+                2000000,
             },
         },
         .color = {
