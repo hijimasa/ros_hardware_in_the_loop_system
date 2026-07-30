@@ -14,6 +14,7 @@
 #include "usb_descriptors.h"
 #include "spi_receiver.h"
 #include "uvc_device.h"
+#include "fault_handler.h"
 #include "frame_buffer.h"
 #include "hardware/gpio.h"
 #include "hardware/timer.h"
@@ -73,6 +74,7 @@ int main(void) {
         tud_task();
         spi_receiver_poll();
         video_task();
+        fault_handler_task();
         led_diagnostic();
     }
 

@@ -8,6 +8,7 @@
 #include "spi_receiver.h"
 #include "frame_buffer.h"
 #include "uvc_device.h"
+#include "fault_handler.h"
 #include "hils_frame_protocol.h"
 
 #include "hardware/uart.h"
@@ -164,11 +165,20 @@ bool spi_receiver_poll(void) {
 
         case HILS_RX_READ_CHECKSUM:
             if (byte == running_checksum && payload_length <= FRAME_BUF_SIZE) {
-                wbuf->length = payload_length;
-                wbuf->ready = true;
-                frame_buffer_swap();
-                gpio_put(LED_PIN, 1);
-                frame_complete = true;
+                uint8_t msg_type = wbuf->data[0];
+                if (msg_type >= HILS_MSG_TYPE_FAULT_SET &&
+                    msg_type <= HILS_MSG_TYPE_RESET_BOOTSEL) {
+                    /* Fault command, not video (JPEG starts with 0xFF) */
+                    fault_handler_process(wbuf->data, payload_length);
+                } else if (fault_should_drop_frame()) {
+                    /* FRAME_DROP: pretend the frame never arrived */
+                } else {
+                    wbuf->length = payload_length;
+                    wbuf->ready = true;
+                    frame_buffer_swap();
+                    gpio_put(LED_PIN, 1);
+                    frame_complete = true;
+                }
             }
             reset_state_machine();
             break;

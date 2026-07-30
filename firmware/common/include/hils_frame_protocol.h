@@ -149,6 +149,76 @@ typedef struct __attribute__((packed)) {
 } hils_lidar_status_t;
 
 /*
+ * Fault injection commands (docs section 9.3 / Phase 5)
+ *
+ * Forward channel: ROS node -> Pico#1 -> device firmware
+ *   0x50: set a firmware-level fault
+ *   0x51: clear a firmware-level fault (fault_code 0 = clear all)
+ *   0x5F: reboot into BOOTSEL for remote reflashing (magic-guarded)
+ * Reverse channel: device firmware -> ROS node
+ *   0x52: acknowledge a set/clear command
+ *
+ * fault_code values are namespaced per device firmware. UVC bridge
+ * (rp2040_camera_uvc):
+ *   0x01 USB_DETACH    arg0 = auto-reconnect after N ms (0 = stay
+ *                             detached until FAULT_CLEAR)
+ *   0x02 FRAME_DROP    arg0 = drop percentage 1-100 (deterministic
+ *                             accumulator thinning, no RNG)
+ *   0x03 PARTIAL_FRAME arg0 = percentage of each frame to keep, 1-99
+ */
+#define HILS_MSG_TYPE_FAULT_SET      0x50
+#define HILS_MSG_TYPE_FAULT_CLEAR    0x51
+#define HILS_MSG_TYPE_FAULT_ACK      0x52
+#define HILS_MSG_TYPE_RESET_BOOTSEL  0x5F
+
+#define HILS_FAULT_UVC_USB_DETACH     0x01
+#define HILS_FAULT_UVC_FRAME_DROP     0x02
+#define HILS_FAULT_UVC_PARTIAL_FRAME  0x03
+
+/* I2C sensor emulator (rp2040_imu_invensense_mpu6050); codes are a
+ * separate namespace from the UVC bridge:
+ *   0x01 NACK        device disappears from the bus (IC_ENABLE=0)
+ *   0x02 RESP_DELAY  arg0 = clock-stretch on the first read byte of
+ *                          each transaction, in microseconds (<=50000)
+ *   0x03 REG_FREEZE  register map stops taking simulation updates
+ *   0x04 WHO_AM_I    arg0 = value returned instead of 0x68
+ */
+#define HILS_FAULT_I2C_NACK           0x01
+#define HILS_FAULT_I2C_RESP_DELAY     0x02
+#define HILS_FAULT_I2C_REG_FREEZE     0x03
+#define HILS_FAULT_I2C_WHO_AM_I       0x04
+
+#define HILS_FAULT_ACK_OK             0x00
+#define HILS_FAULT_ACK_UNKNOWN_CODE   0x01
+#define HILS_FAULT_ACK_BAD_ARG        0x02
+
+/* "BOOT" little-endian; RESET_BOOTSEL without this magic is ignored */
+#define HILS_RESET_BOOTSEL_MAGIC      0x544F4F42u
+
+typedef struct __attribute__((packed)) {
+    uint8_t  msg_type;        /* HILS_MSG_TYPE_FAULT_SET */
+    uint8_t  fault_code;      /* HILS_FAULT_* (device namespace) */
+    uint32_t arg0;            /* little-endian, meaning per fault_code */
+    uint32_t arg1;            /* reserved, 0 */
+} hils_fault_set_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  msg_type;        /* HILS_MSG_TYPE_FAULT_CLEAR */
+    uint8_t  fault_code;      /* 0 = clear all */
+} hils_fault_clear_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  msg_type;        /* HILS_MSG_TYPE_FAULT_ACK */
+    uint8_t  fault_code;      /* echoed */
+    uint8_t  status;          /* HILS_FAULT_ACK_* */
+} hils_fault_ack_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  msg_type;        /* HILS_MSG_TYPE_RESET_BOOTSEL */
+    uint32_t magic;           /* HILS_RESET_BOOTSEL_MAGIC */
+} hils_reset_bootsel_t;
+
+/*
  * Servo PWM capture message types (for PWM servo-input HILS bridge)
  *
  * Reverse channel: firmware -> ROS node

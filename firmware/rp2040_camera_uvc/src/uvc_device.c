@@ -14,6 +14,7 @@
 #include "tusb.h"
 #include "uvc_device.h"
 #include "frame_buffer.h"
+#include "fault_handler.h"
 #include "usb_descriptors.h"
 #include "hils_frame_protocol.h"
 #include <string.h>
@@ -144,7 +145,8 @@ void video_task(void) {
     uint32_t send_len;
     if (has_real_frame) {
         send_buf = uvc_tx_buf;
-        send_len = uvc_tx_len;
+        /* PARTIAL_FRAME fault: transmit a truncated (broken) JPEG */
+        send_len = fault_effective_frame_len(uvc_tx_len);
     } else {
         const uint8_t *blank;
         uint32_t blank_len;

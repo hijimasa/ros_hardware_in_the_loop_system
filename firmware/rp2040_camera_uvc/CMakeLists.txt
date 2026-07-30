@@ -15,6 +15,7 @@ add_executable(rp2040_camera_uvc
     src/uvc_device.c
     src/usb_descriptors.c
     src/frame_buffer.c
+    src/fault_handler.c
 )
 
 target_include_directories(rp2040_camera_uvc PRIVATE

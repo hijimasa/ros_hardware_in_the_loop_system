@@ -18,6 +18,7 @@
 
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
+#include "pico/bootrom.h"
 #include "hardware/i2c.h"
 #include "hardware/irq.h"
 #include "hardware/gpio.h"
@@ -25,9 +26,14 @@
 #include "hils_frame_protocol.h"
 
 /* ---------- Pin assignments ---------- */
-#define SDA_PIN             4       /* I2C0 SDA */
-#define SCL_PIN             5       /* I2C0 SCL */
+#define SDA_PIN             4       /* I2C0 SDA (physical pin 6) */
+#define SCL_PIN             5       /* I2C0 SCL (physical pin 7) */
 #define LED_PIN             25
+/* Driven high as a 3.3V rail for the external I2C pull-ups, so the
+ * bus can be wired entirely on physical pins 5-8 (rail, SDA, SCL,
+ * GND) without reaching the 3V3(OUT) pin 36. Two 4.7k pull-ups draw
+ * at most ~1.4 mA, well inside the 12 mA drive strength. */
+#define PULLUP_RAIL_PIN     3       /* physical pin 5 */
 
 /* ---------- MPU-6050 Configuration ---------- */
 #define MPU6050_ADDR        0x68    /* Default I2C address (AD0=0) */
@@ -75,6 +81,14 @@ typedef struct __attribute__((packed)) {
 #define REG_MAP_SIZE  128
 static volatile uint8_t reg_map[REG_MAP_SIZE];
 static volatile uint8_t reg_ptr = 0;   /* Current register pointer */
+
+/* ---------- Fault injection state (docs 9.5 / Phase 5) ---------- */
+static volatile bool     fault_nack = false;      /* IC_ENABLE held low */
+static volatile uint32_t fault_delay_us = 0;      /* clock stretch */
+static volatile bool     fault_reg_freeze = false;
+/* Clock-stretch only the first read byte of each transaction, not all
+ * 14 burst bytes: set on STOP/RESTART, consumed by the next RD_REQ. */
+static volatile bool     stretch_next_rd = true;
 
 /* Flag: true when master is writing (first byte after address is register pointer) */
 static volatile bool reg_ptr_written = false;
@@ -181,8 +195,123 @@ static void init_register_map(void) {
     reg_map[REG_TEMP_OUT_L] = (uint8_t)(temp_raw & 0xFF);
 }
 
+/* ---------- Fault command handling (docs 9.5 / Phase 5) ---------- */
+
+/* Framed reverse-channel write over CDC (same pattern as Pico#1) */
+static void send_ack(uint8_t fault_code, uint8_t status) {
+    hils_fault_ack_t ack = {
+        .msg_type   = HILS_MSG_TYPE_FAULT_ACK,
+        .fault_code = fault_code,
+        .status     = status,
+    };
+    hils_frame_header_t hdr;
+    hils_build_header(&hdr, sizeof(ack));
+    uint8_t checksum = hils_compute_checksum((const uint8_t *)&ack,
+                                             sizeof(ack));
+    const uint8_t *parts[] = {
+        (const uint8_t *)&hdr, (const uint8_t *)&ack, &checksum
+    };
+    uint32_t sizes[] = { sizeof(hdr), sizeof(ack), 1 };
+    for (int p = 0; p < 3; p++) {
+        for (uint32_t j = 0; j < sizes[p]; j++) {
+            putchar_raw(parts[p][j]);
+        }
+    }
+    stdio_flush();
+}
+
+static void set_nack(bool active) {
+    /* IC_ENABLE=0 makes the peripheral stop ACKing its address - the
+     * device vanishes from the bus without touching the pins. */
+    i2c0->hw->enable = active ? 0 : 1;
+    fault_nack = active;
+}
+
+static void handle_fault_set(const uint8_t *payload, uint32_t len) {
+    if (len < sizeof(hils_fault_set_t)) {
+        send_ack(0, HILS_FAULT_ACK_BAD_ARG);
+        return;
+    }
+    hils_fault_set_t cmd;
+    memcpy(&cmd, payload, sizeof(cmd));
+
+    switch (cmd.fault_code) {
+    case HILS_FAULT_I2C_NACK:
+        set_nack(true);
+        break;
+    case HILS_FAULT_I2C_RESP_DELAY:
+        if (cmd.arg0 < 1 || cmd.arg0 > 50000) {
+            send_ack(cmd.fault_code, HILS_FAULT_ACK_BAD_ARG);
+            return;
+        }
+        fault_delay_us = cmd.arg0;
+        break;
+    case HILS_FAULT_I2C_REG_FREEZE:
+        fault_reg_freeze = true;
+        break;
+    case HILS_FAULT_I2C_WHO_AM_I:
+        if (cmd.arg0 > 0xFF) {
+            send_ack(cmd.fault_code, HILS_FAULT_ACK_BAD_ARG);
+            return;
+        }
+        reg_map[REG_WHO_AM_I] = (uint8_t)cmd.arg0;
+        break;
+    default:
+        send_ack(cmd.fault_code, HILS_FAULT_ACK_UNKNOWN_CODE);
+        return;
+    }
+    send_ack(cmd.fault_code, HILS_FAULT_ACK_OK);
+}
+
+static void handle_fault_clear(const uint8_t *payload, uint32_t len) {
+    if (len < sizeof(hils_fault_clear_t)) {
+        send_ack(0, HILS_FAULT_ACK_BAD_ARG);
+        return;
+    }
+    uint8_t code = payload[1];
+    if (code == 0 || code == HILS_FAULT_I2C_NACK) {
+        set_nack(false);
+    }
+    if (code == 0 || code == HILS_FAULT_I2C_RESP_DELAY) {
+        fault_delay_us = 0;
+    }
+    if (code == 0 || code == HILS_FAULT_I2C_REG_FREEZE) {
+        fault_reg_freeze = false;
+    }
+    if (code == 0 || code == HILS_FAULT_I2C_WHO_AM_I) {
+        reg_map[REG_WHO_AM_I] = WHO_AM_I_VALUE;
+    }
+    send_ack(code, HILS_FAULT_ACK_OK);
+}
+
+static void fault_process(const uint8_t *payload, uint32_t len) {
+    switch (payload[0]) {
+    case HILS_MSG_TYPE_FAULT_SET:
+        handle_fault_set(payload, len);
+        break;
+    case HILS_MSG_TYPE_FAULT_CLEAR:
+        handle_fault_clear(payload, len);
+        break;
+    case HILS_MSG_TYPE_RESET_BOOTSEL: {
+        hils_reset_bootsel_t cmd;
+        if (len >= sizeof(cmd)) {
+            memcpy(&cmd, payload, sizeof(cmd));
+            if (cmd.magic == HILS_RESET_BOOTSEL_MAGIC) {
+                reset_usb_boot(0, 0);   /* does not return */
+            }
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 /* ---------- Update sensor registers from CDC data ---------- */
 static void update_sensor_data(const uint8_t *payload, uint32_t len) {
+    if (fault_reg_freeze) {
+        return;   /* REG_FREEZE fault: registers keep their last values */
+    }
     if (len < sizeof(hils_i2c_sensor_data_t)) {
         return;
     }
@@ -238,6 +367,15 @@ static void i2c_slave_irq_handler(void) {
 
     /* Master requests a read: send data from register map */
     if (status & I2C_IC_INTR_STAT_R_RD_REQ_BITS) {
+        /* RESP_DELAY fault: hold off the first byte of the transaction.
+         * The bus clock-stretches while data_cmd stays empty, exactly
+         * how a slow real sensor looks to the master. Busy-waiting in
+         * the ISR is fine here - serving the bus IS this device's job. */
+        if (fault_delay_us && stretch_next_rd) {
+            busy_wait_us_32(fault_delay_us);
+        }
+        stretch_next_rd = false;
+
         /* Write the byte at current register pointer to TX buffer */
         uint8_t val = reg_map[reg_ptr & (REG_MAP_SIZE - 1)];
         i2c0->hw->data_cmd = (uint32_t)val;
@@ -280,17 +418,25 @@ static void i2c_slave_irq_handler(void) {
     /* STOP or RESTART condition: reset write state for next transaction */
     if (status & I2C_IC_INTR_STAT_R_STOP_DET_BITS) {
         reg_ptr_written = false;
+        stretch_next_rd = true;
         (void)i2c0->hw->clr_stop_det;
     }
 
     if (status & I2C_IC_INTR_STAT_R_RESTART_DET_BITS) {
         reg_ptr_written = false;
+        stretch_next_rd = true;
         (void)i2c0->hw->clr_restart_det;
     }
 }
 
 /* ---------- I2C Slave Initialization ---------- */
 static void i2c_slave_init(void) {
+    /* 3.3V rail for the external pull-up resistors */
+    gpio_init(PULLUP_RAIL_PIN);
+    gpio_set_dir(PULLUP_RAIL_PIN, GPIO_OUT);
+    gpio_set_drive_strength(PULLUP_RAIL_PIN, GPIO_DRIVE_STRENGTH_12MA);
+    gpio_put(PULLUP_RAIL_PIN, 1);
+
     /* Initialize I2C0 peripheral */
     i2c_init(i2c0, I2C_BAUDRATE);
 
@@ -347,7 +493,13 @@ int main(void) {
         if (count > 0) {
             for (int i = 0; i < count; i++) {
                 if (process_byte(cdc_buf[i])) {
-                    update_sensor_data(rx_payload, payload_length);
+                    uint8_t msg_type = rx_payload[0];
+                    if (msg_type >= HILS_MSG_TYPE_FAULT_SET &&
+                        msg_type <= HILS_MSG_TYPE_RESET_BOOTSEL) {
+                        fault_process(rx_payload, payload_length);
+                    } else {
+                        update_sensor_data(rx_payload, payload_length);
+                    }
                     frame_count++;
 
                     /* Toggle LED on each received frame */
