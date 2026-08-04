@@ -64,10 +64,12 @@ firmware/rp2040_<sensor_type>_<protocol_or_vendor_series>/
 | Livox Mid-360 | USB-LAN + SW | hils_bridge_lidar_livox_mid360 | 不要 | 実装済・**動作確認済** |
 | Velodyne VLP-16 | USB-LAN + SW | hils_bridge_lidar_velodyne_vlp16 | 不要 | 実装済・**動作確認済** |
 | Ouster OS1 | USB-LAN + SW | hils_bridge_lidar_ouster_os1 | 不要 | 実装済・**動作確認済**[^ouster-note] |
+| Hokuyo YVT-35LX | USB-LAN + SW | hils_bridge_lidar_hokuyo_yvt35lx | 不要 | 実装済・**動作確認済**[^yvt-note] |
 | GPS (NMEA 0183) | FT234X x 2 | hils_bridge_gps_nmea0183 | 不要 | 実装済・**動作確認済** |
 | IMU (Witmotion WT901) | FT234X x 2 | hils_bridge_imu_witmotion_wt901 | 不要 | 実装済・**動作確認済**[^witmotion-note] |
 
 [^ouster-note]: Ouster はエミュレータ側で HTTP REST API (port 80) を提供するため Docker では `sysctls: net.ipv4.ip_unprivileged_port_start=80` が必要。詳細は [docs/hils_verification_guide.md](docs/hils_verification_guide.md#13-ouster-os1) を参照。
+[^yvt-note]: YVT-35LX エミュレータは VSSP 2.1 を TCP で提供する（制御と計測を 1 ソケットに多重化）ため、ループバック E2E では NIC の増設が不要。`bash ros2_hils_bridge/tools/run_yvt35lx_e2e.sh` で実ドライバ `urg3d_node2` を駆動する。他の被試験ドライバと同様に本リポジトリには同梱しないので、colcon ワークスペースへ各自で clone すること（`git clone --recursive https://github.com/Hokuyo-aut/urg3d_node2`、ビルドに `ros-<distro>-laser-proc` が必要）。この回帰でドライバ側の欠陥（VSSP ストリームのバイト破損で `urg3d_node2` が segfault）も判明しており、[docs/fault_injection_implementation_policy.md](docs/fault_injection_implementation_policy.md) 22.5 節に記録している。
 [^witmotion-note]: IMU エミュレータは WT901 標準の 4 種パケット (0x51 加速度 / 0x52 角速度 / 0x53 オイラー / 0x59 クォータニオン) を出力するため、`witmotion_ros` (ElettraSciComp) のデフォルト `use_native_orientation: true` のまま動作する。ドライバビルドには `libqt5serialport5-dev` が必要（Dockerfile 反映済）。詳細は [docs/hils_verification_guide.md](docs/hils_verification_guide.md#22-シリアルimu-witmotion-wt901) を参照。
 
 ### 方面 B: マイコン開発者向け（RP2040 ファームウェア）

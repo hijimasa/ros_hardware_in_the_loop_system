@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-v4l2-camera \
     ros-jazzy-nmea-navsat-driver \
     ros-jazzy-ouster-ros \
+    ros-jazzy-laser-proc \
     ros-jazzy-teleop-twist-keyboard \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*

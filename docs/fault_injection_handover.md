@@ -20,7 +20,7 @@
 | シナリオ例・launch | `hils_bringup/scenarios/`, `launch/` | 実装済み |
 | CI(ビルド+単体92件+GPS E2E、nightly) | `.github/workflows/hils_tests.yml` | 実装済み(初回実行の確認は未) |
 
-対応エミュレータ: Velodyne VLP-16 / Livox Mid-360 / Ouster OS1(HTTP故障含む)/ NMEA GPS / WT901 IMU / UVCカメラ(PC側のみ)。`serial_write()`/`send_udp()`を使う全ブリッジが自動的に故障注入対応になる。
+対応エミュレータ: Velodyne VLP-16 / Livox Mid-360 / Ouster OS1(HTTP故障含む)/ Hokuyo YVT-35LX(VSSP 2.1 TCP)/ NMEA GPS / WT901 IMU / UVCカメラ(PC側のみ)。`serial_write()`/`send_udp()`を使う全ブリッジが自動的に故障注入対応になる。
 
 ### 1.2 実ドライバ検証済み
 
@@ -31,6 +31,7 @@
 | nmea_navsat_driver | チェックサム不正で/fix停止・ドライバ生存・復帰(PTYペアおよびFT234X実機経路、オラクル自動判定PASS) | 方針書22.1節Phase 4 |
 | witmotion_ros (ElettraSciComp) | wt901_checksum故障で/imu停止・ドライバ生存・復帰(PTYペアおよびFT234X実機経路、オラクル自動判定PASS) | 方針書22.1節Phase 4 |
 | UVCホスト(Linux uvcvideo) | Picoペア実機で正常系(映像+解像度逆コマンド)、drop/corrupt/delayのフリーズ・回復挙動 | 方針書22.2節 |
+| urg3d_node2 (Hokuyo公式) | 正常系(VSSP 2.1ハンドシェイク→10Hz点群)、計測ストリーム3秒停止からの自動復帰(オラクル自動判定PASS)。バイト破損では**ドライバがsegfault**(発見事項、方針書22.5節) | 方針書22.5節 |
 
 ### 1.3 主要な発見事項
 
@@ -92,6 +93,11 @@ ros2 run hils_bridge_base scenario_runner --ros-args \
   `E2E_BAG=<bagディレクトリ>`)
 - Ouster: `bash tools/run_ouster_e2e.sh`(`ouster-ros`。HTTP port 80の
   bind権限が必要=rootまたは`ip_unprivileged_port_start=80`)
+- Hokuyo YVT-35LX: `bash tools/run_yvt35lx_e2e.sh`(`urg3d_node2`の
+  ソースビルドが必要=`git clone --recursive
+  https://github.com/Hokuyo-aut/urg3d_node2`+`ros-<distro>-laser-proc`。
+  ループバックTCP、点群源は合成壁または`E2E_BAG=<bagディレクトリ>`。
+  既定シナリオは`yvt35lx_blackout_001`、`E2E_SCENARIO=<名前>`で切替)
 
 ---
 

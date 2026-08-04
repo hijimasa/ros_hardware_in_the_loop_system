@@ -64,10 +64,12 @@ When adding a new emulator, decide the sensor type, then pick the standard proto
 | Livox Mid-360 | USB-LAN + SW | hils_bridge_lidar_livox_mid360 | N/A | Implemented, **verified** (incl. fault-injection regression vs livox_ros_driver2) |
 | Velodyne VLP-16 | USB-LAN + SW | hils_bridge_lidar_velodyne_vlp16 | N/A | Implemented, **verified** |
 | Ouster OS1 | USB-LAN + SW | hils_bridge_lidar_ouster_os1 | N/A | Implemented, **verified**[^ouster-note] |
+| Hokuyo YVT-35LX | USB-LAN + SW | hils_bridge_lidar_hokuyo_yvt35lx | N/A | Implemented, **verified**[^yvt-note] |
 | GPS (NMEA 0183) | FT234X x 2 | hils_bridge_gps_nmea0183 | N/A | Implemented, **verified** |
 | IMU (Witmotion WT901) | FT234X x 2 | hils_bridge_imu_witmotion_wt901 | N/A | Implemented, **verified**[^witmotion-note] |
 
 [^ouster-note]: For Ouster, the emulator exposes HTTP REST API on port 80, so Docker requires `sysctls: net.ipv4.ip_unprivileged_port_start=80`. See [docs/hils_verification_guide.md](docs/hils_verification_guide.md#13-ouster-os1) for details.
+[^yvt-note]: The YVT-35LX emulator speaks VSSP 2.1 over TCP (control and measurement multiplexed on one socket), so no extra NIC is needed for the loopback E2E: `bash ros2_hils_bridge/tools/run_yvt35lx_e2e.sh` drives the real `urg3d_node2`. Clone it into your colcon workspace yourself (`git clone --recursive https://github.com/Hokuyo-aut/urg3d_node2`, needs `ros-<distro>-laser-proc`) — like every other device driver under test, it is not vendored here. That regression also surfaced a driver defect — byte corruption on the VSSP stream segfaults `urg3d_node2` — recorded in [docs/fault_injection_implementation_policy.md](docs/fault_injection_implementation_policy.md) section 22.5.
 [^witmotion-note]: The IMU emulator emits the four standard WT901 packets (0x51 Accel / 0x52 Gyro / 0x53 Euler / 0x59 Quaternion) so it works with `witmotion_ros` (ElettraSciComp) at default `use_native_orientation: true`. Driver build needs `libqt5serialport5-dev` (already in the Dockerfile). See [docs/hils_verification_guide.md](docs/hils_verification_guide.md#22-シリアルimu-witmotion-wt901) for setup details.
 
 ### Track B: Microcontroller developers (RP2040 firmware)

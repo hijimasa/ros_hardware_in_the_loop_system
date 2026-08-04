@@ -148,6 +148,75 @@ ros2 launch ouster_ros sensor.launch.xml \
 
 ---
 
+### 1.4 Hokuyo YVT-35LX（VSSP 2.1 / TCP）
+
+Livox・Velodyne・OusterがUDPなのに対し、YVT-35LXは**TCPの1セッションに
+制御と計測を多重化**する。このためポート増設もマルチキャストも不要で、
+ループバック（`device_ip=host_ip=127.0.0.1`）だけでE2Eが完結する。
+
+被試験ドライバは北陽電機公式の`urg3d_node2`。他の被試験ドライバと
+同様に本リポジトリには同梱しないので、colconワークスペースへ各自で
+cloneする。`urg3d_library`をサブモジュールに持つので`--recursive`が必要。
+ビルドには`ros-<distro>-laser-proc`が必要（Dockerfile反映済み）。
+
+```bash
+cd ~/colcon_ws/src
+git clone --recursive https://github.com/Hokuyo-aut/urg3d_node2
+cd ~/colcon_ws && colcon build --packages-up-to \
+  hils_bridge_lidar_hokuyo_yvt35lx urg3d_node2 && source install/setup.bash
+```
+
+#### ハードウェア不要のワンコマンドE2E（推奨）
+
+```bash
+bash ros2_hils_bridge/tools/run_yvt35lx_e2e.sh
+# 既定シナリオ: yvt35lx_blackout_001（計測ストリーム3秒停止→復帰）
+# 点群源は合成10m壁。実bagを使う場合:
+#   E2E_BAG=<bagディレクトリ> E2E_BAG_TOPIC=/livox/lidar bash ...
+# 別シナリオ: E2E_SCENARIO=yvt35lx_stream_fault_001 bash ...
+```
+
+#### 手動起動（1台PC内、ループバック）
+
+```bash
+# エミュレータ
+ros2 run hils_bridge_lidar_hokuyo_yvt35lx yvt35lx_emulator_node --ros-args \
+  -p device_ip:=127.0.0.1 -p host_ip:=127.0.0.1 \
+  -p pointcloud_topic:=/sim_points
+
+# ドライバ（ライフサイクルノードなので遷移を明示する）
+ros2 run urg3d_node2 urg3d_node2_node --ros-args \
+  -p ip_address:=127.0.0.1 -p publish_intensity:=true -p publish_auxiliary:=true
+ros2 lifecycle set /urg3d_node2 configure
+ros2 lifecycle set /urg3d_node2 activate
+
+# 確認
+ros2 topic hz /hokuyo_cloud2   # 期待: 約10Hz（scan_rate_hz と一致）
+ros2 topic hz /imu             # publish_auxiliary:=true のとき
+```
+
+#### 2台PC間検証（USB-LANアダプタ）
+
+```bash
+# --- シミュレーションPC ---
+sudo ip addr add 192.168.0.10/24 dev eth1   # YVT-35LX の既定IP
+ros2 launch hils_bridge_lidar_hokuyo_yvt35lx yvt35lx_emulator.launch.py \
+  network_interface:=eth1 host_ip:=192.168.0.15 pointcloud_topic:=/points
+
+# --- 実機PC (192.168.0.15) ---
+ros2 launch urg3d_node2 urg3d_node2.launch.py   # config/params.yaml の ip_address を 192.168.0.10 に
+```
+
+#### ⚠️ YVT-35LX 固有の注意点
+
+| 項目 | 内容 |
+|------|------|
+| **ライフサイクル** | `ros2 lifecycle set` は遷移に失敗しても終了コード0を返すことがある。到達状態を`ros2 lifecycle get`で確認すること |
+| **インターレース** | `SET:_itl`/`SET:_itv`は受理しモータ/REMフィールド番号も巡回するが、全フィールドが同一角度格子を走査する（角度分解能の向上は再現しない） |
+| **バイト破損故障** | 実ドライバが**segfaultする**（方針書22.5節）。`yvt35lx_stream_fault_001`は現時点でFAILするのが正しい挙動 |
+
+---
+
 ## 2. シリアルセンサエミュレータ（2台PC + FT234X × 2）
 
 ### 必要機材

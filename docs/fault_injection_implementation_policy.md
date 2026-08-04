@@ -1698,3 +1698,77 @@ Discovery→設定→WorkMode Normal→点群/IMU受信のSDK2ハンドシェイ
 | --- | --- | --- | --- |
 | Livoxノード | `lidar_ip` | `device_ip` | `lidar_ip`のまま(内部でマッピング) |
 | カメラノード | `max_fps` | `max_hz` | `max_fps`のまま(内部でマッピング) |
+
+### 22.5 Hokuyo YVT-35LX(VSSP 2.1)エミュレータ(2026-08-04実施)
+
+北陽電機の3D LiDAR YVT-35LXを、実機もシミュレータも無しで
+`urg3d_node2`(Hokuyo公式ドライバ)を評価できるようにした。
+これまでのEthernet機器(Livox/Velodyne/Ouster)がUDPであるのに対し、
+YVT-35LXはVSSPのTCPセッションで制御と計測を同一ソケットに多重化する
+点が異なる。
+
+実装:
+
+* `hils_bridge_lidar_hokuyo_yvt35lx`:VSSP 2.1のTCPサーバ(既定10940)。
+  パケット構築は`vssp_protocol.py`に純関数として分離し、仕様書の言い換え
+  ではなく実際の消費側である`urg3d_library`のパーサ実装
+  (`Urg3dSensor.cpp`)に合わせて記述
+* 対応コマンド:`VER`/`GET:stat`/`GET:_itl`/`GET:_itv`/`GET:tblh`/
+  `GET:tvNN`/`SET:_itl`/`SET:_itv`/`DAT:ro|ri|ax=0|1`/`RST`
+* 計測パケット:`_ri`/`_ro`(36ライン×74スポット、22バイトrange header、
+  ライン単位のindexブロック)、`_ax`(ジャイロ/加速度/コンパス/温度)
+* 点群源は任意の`PointCloud2`。`ScanGeometry`が方位角・仰角から
+  (ライン,スポット)格子へ最近傍ビニングし、同一セルでは最近距離の
+  エコーを残す。ドライバ側で再構成した壁の位置誤差は最大0.16 m
+  (合成10 m壁、ビン幅由来)
+* チャネルは`data`(計測)/`command`(応答)/`imu`(`_ax`)に分離。TCPは
+  順序を保つため、delay故障は後続パケットも道連れに遅延する(実際の
+  輻輳と同じ挙動)
+
+E2E(ハードウェア不要、`tools/run_yvt35lx_e2e.sh`):
+
+* 正常系:VSSPハンドシェイク→`urg3d_node2`が10 Hzで
+  `/hokuyo_cloud2`と`/imu`を配信
+* `yvt35lx_blackout_001`(既定):計測ストリームのみ3秒停止。
+  オラクル4件すべてPASS(停止t=10.00s、復帰t=13.04s=解除の0.04秒後、
+  `/imu`は最悪ギャップ0.11秒で無傷、ドライバ生存)。
+  urg3d_node2の`error_limit`(既定4、1秒周期で計上)を下回るため
+  再接続なしで復帰することを機械的に確認できた
+* `yvt35lx_stream_fault_001`:バイト破損(20%、4バイトビット反転)。
+  **下記の発見事項によりドライバがクラッシュするため現状FAILする**
+
+発見事項:**`urg3d_node2`はVSSP計測パケットの破損に対して堅牢でない。**
+バイト破損(20%、4バイトビット反転)を注入すると数秒〜十数秒で
+ドライバプロセスがsegfaultする。12.1節「異常データを正常値として
+公開しない」以前に、プロセスが生存しない。
+
+gdbで捕捉したクラッシュ地点(2026-08-04、jazzy、liburg3d_c.so):
+
+```
+Thread 15 received signal SIGSEGV
+#0 Urg3dSensor::setCommonMeasurementData(...)
+#1 Urg3dSensor::highGetMeasurementData(...)
+#2 urg3d_node2::Urg3dNode2::scan_thread()
+```
+
+`urg3d_library`のパーサは範囲ヘッダのフィールドを使用した**後**に
+しか検証しておらず、少なくとも次の3箇所が破損値でそのまま使われる:
+
+* `setCommonMeasurementData()`(**実際のクラッシュ地点**):
+  `data.spots[spot]`を`spot ∈ [rangeHeader.spot, rangeHeader.spot +
+  nspots)`で添字アクセスする。`data.spots`は74要素固定で、`spot`の
+  上限検査は無い。また`remField > remInterlaceCount`のみを弾くため
+  `remField == remInterlaceCount`はテーブル範囲外に1要素はみ出す
+* `lowGetRangeHeader()`:`rb->read(buf, rangeHeader.headerLength - 2)`で
+  u16のheaderLength(最大65535)をスタック上の16 KiBバッファへ読む
+* 同:`rb->read((char*)rangeIndex.index.data() + rangeHeader.spot, ...)`は
+  `spot`を**バイトオフセット**として75要素(150バイト)のvectorに
+  加算する。境界検査は無く、`nspots`の検査もこの読み出しの後
+
+単一フィールドだけを狙った切り分け(`tools/probe_urg3d_range_header.py`、
+`spot=8000`/`nspots=4000`/`headerLength=40000`/`remField=9`を各1発)では
+即死しなかった。1発の境界越えはヒープを静かに壊すだけで、
+実際のバイト破損のように複数フィールドが同時に壊れて初めて
+可視のクラッシュになる。修正するならパーサ側で
+`headerLength`/`spot`/`nspots`/`remField`を使用前に検証するべきで、
+これは実LiDARでもノイズの多い産業用Ethernet上で起こり得る。
