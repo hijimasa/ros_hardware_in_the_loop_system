@@ -95,9 +95,12 @@ ros2 run hils_bridge_base scenario_runner --ros-args \
   bind権限が必要=rootまたは`ip_unprivileged_port_start=80`)
 - Hokuyo YVT-35LX: `bash tools/run_yvt35lx_e2e.sh`(`urg3d_node2`の
   ソースビルドが必要=`git clone --recursive
-  https://github.com/Hokuyo-aut/urg3d_node2`+`ros-<distro>-laser-proc`。
+  https://github.com/Hokuyo-aut/urg3d_node2`+`ros-<distro>-laser-proc`
+  +`ros-<distro>-diagnostic-updater`。
   ループバックTCP、点群源は合成壁または`E2E_BAG=<bagディレクトリ>`。
-  既定シナリオは`yvt35lx_blackout_001`、`E2E_SCENARIO=<名前>`で切替)
+  既定シナリオは`yvt35lx_blackout_001`、`E2E_SCENARIO=<名前>`で切替。
+  他E2Eの残留ノードと分離するため専用の`ROS_DOMAIN_ID=71`で動く
+  =方針書22.5節。`E2E_DOMAIN_ID`で変更可)
 
 ---
 

@@ -1588,6 +1588,7 @@ Phase 6(初期実装):
     `scenario_runner`が次回実行のオラクルのクロック同期に応答して
     誤判定(window [0,0]でFAIL)を引き起こす。全E2Eスクリプトを
     `setsid`+プロセスグループkillに変更して解消
+    (**2026-08-05追記: この対策は不完全だった。下記の再発を参照**)
   - オラクルの観測スレッドをjoinせずにコンテキストを破棄していた
     ため、判定完了後のシャットダウンでまれにC++層がabortし
     exit codeが化ける(判定はPASSでもCIが赤になる)。
@@ -1699,7 +1700,7 @@ Discovery→設定→WorkMode Normal→点群/IMU受信のSDK2ハンドシェイ
 | Livoxノード | `lidar_ip` | `device_ip` | `lidar_ip`のまま(内部でマッピング) |
 | カメラノード | `max_fps` | `max_hz` | `max_fps`のまま(内部でマッピング) |
 
-### 22.5 Hokuyo YVT-35LX(VSSP 2.1)エミュレータ(2026-08-04実施)
+### 22.5 Hokuyo YVT-35LX(VSSP 2.1)エミュレータ(2026-08-04実施、CI対応2026-08-05)
 
 北陽電機の3D LiDAR YVT-35LXを、実機もシミュレータも無しで
 `urg3d_node2`(Hokuyo公式ドライバ)を評価できるようにした。
@@ -1772,3 +1773,45 @@ Thread 15 received signal SIGSEGV
 可視のクラッシュになる。修正するならパーサ側で
 `headerLength`/`spot`/`nspots`/`remField`を使用前に検証するべきで、
 これは実LiDARでもノイズの多い産業用Ethernet上で起こり得る。
+
+**CI初回実行での失敗と対策(2026-08-05)。** GitHub Actions上で
+`yvt35lx_blackout_001`が1 pass / 3 failとなった。判定内容の問題では
+なく、オラクルがランナーの`get_scenario_state`から**一度も時計を
+同期できず**、`max_wait_sec`(既定300秒)まで待って打ち切ったため
+(症状は`window [0.00, 0.00]`でのFAIL)。これは22.2節に記録済みの
+「孤児`scenario_runner`が次回実行のオラクルのクロック同期を狂わせる」
+と同一症状であり、2026-07-31の`setsid`+プロセスグループkill対策が
+**不完全だった**ことを意味する。実際、CI相当のコンテナで4本を
+CIと同じ順序で通したところ、Velodyne E2E終了の118秒後にも
+`velodyne_driver`が、YVT E2E終了の484秒後にも`urg3d_node2`が
+生存していた(`urg3d_node2`はSIGTERMで終了しないことがある。
+scanスレッドがソケットでブロックしjoinが返らないため)。
+
+なお、この通し実行自体は4本ともPASSし、**CI失敗のローカル再現は
+できていない**。GitHubランナー固有のタイミングに依存する。
+そのため以下は「観測された故障モードに対する多層の耐性強化」であり、
+単一の根本原因を証明したものではない:
+
+* オラクル(`observation/oracle_node.py`):応答の返らないサービス
+  要求で`_poll_busy`が立ちっぱなしになり、以後**一度もポーリング
+  しない**という単一障害点があった。5秒で要求を破棄して再試行する
+  (`remove_pending_request`)。加えて、時計が同期できない理由
+  (サービス未発見/ランナー未開始)を10秒ごとに警告する。従来は
+  起動ログとタイムアウト判定の間が完全に無言で、CIの成果物だけ
+  からは原因を特定できなかった
+* `tools/run_yvt35lx_e2e.sh`:既定で専用の`ROS_DOMAIN_ID`(71)を
+  使う。同一ジョブ内の先行E2Eの残留ノードとは名前空間ごと分離
+  されるため、同名の`hils_scenario_runner`に誤って接続し得ない
+  (`E2E_DOMAIN_ID`または呼び出し側の`ROS_DOMAIN_ID`で上書き可)
+* 同スクリプトのcleanup:SIGTERM後5秒待って残っていればSIGKILL
+* CI:`ros-jazzy-diagnostic-updater`を明示的に追加(urg3d_node2の
+  ビルド依存。従来はvelodyne/ouster経由で偶然入っていた)
+
+**副次的な発見: `velodyne_power_loss_001`はフレーク。** 上記の調査中、
+同一バイナリでVelodyne E2Eが1回目FAIL・2回目PASSとなった。復帰時刻は
+測定できた回すべてt=23.0〜23.1s(基準t=20.0sから3.0〜3.1s)で、
+期待条件の`within_sec: 5.0`に対し余裕が2秒弱しかない。負荷の高い
+ランナーでは超過してCIが赤くなる。オラクル側は両方とも正しく判定して
+おり(時計同期・`topic_timeout`検出とも正常)、今回のオラクル変更とは
+無関係。`within_sec`を10秒程度に緩めるのが妥当だが、YVT対応の範囲外
+のため未変更。
